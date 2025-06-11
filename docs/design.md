@@ -17,7 +17,7 @@ The **MinIO Manager Service** is a centralized FastAPI-based component that prog
     ```
     s3a://cdm-lake/warehouse/{user_name}/
     ```
-  - Automatically generate and attach a policy granting `GetObject`, `PutObject`, `ListBucket` on that path.
+  - Automatically generate and attach a policy granting `GetObject`, `PutObject`, `ListBucket`, `DeleteObject`, etc. on that path.
 
 - **Group Management**
   - Create named groups (e.g. `KBase`, `BER`, `CDM_Science`).
