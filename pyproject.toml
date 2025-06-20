@@ -1,7 +1,7 @@
 [project]
 name = "cdm-minio-service"
 version = "0.1.0"
-description = "Add your description here"
+description = "MinIO service for CDM"
 readme = "README.md"
 requires-python = ">=3.13"
 
