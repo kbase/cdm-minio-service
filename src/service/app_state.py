@@ -48,7 +48,7 @@ async def build_app(app: FastAPI) -> None:
 
     # Store components in app state
     app.state._auth = auth
-    app.state._spark_state = AppState(auth=auth)
+    app.state._minio_manager_state = AppState(auth=auth)
     logger.info("Application state initialized")
 
 
@@ -94,9 +94,9 @@ def _get_app_state_from_app(app: FastAPI) -> AppState:
     Raises:
         ValueError: If app state has not been initialized.
     """
-    if not hasattr(app.state, "_spark_state") or not app.state._spark_state:
+    if not hasattr(app.state, "_minio_manager_state") or not app.state._minio_manager_state:
         raise ValueError("App state has not been initialized")
-    return app.state._spark_state
+    return app.state._minio_manager_state
 
 
 def set_request_user(request: Request, user: KBaseUser | None) -> None:

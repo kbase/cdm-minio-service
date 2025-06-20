@@ -1,5 +1,5 @@
 """
-Main application module for the Spark Manager API.
+Main application module for the MinIO Manager API.
 """
 
 import logging

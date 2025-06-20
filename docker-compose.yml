@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  minio:
+    image: minio/minio:RELEASE.2025-04-22T22-12-26Z-cpuv1
+    ports:
+      - "9002:9002"
+      # MinIO Console is available at http://localhost:9003
+      - "9003:9003"
+    environment:
+      MINIO_ROOT_USER: minio
+      MINIO_ROOT_PASSWORD: minio123
+    healthcheck:
+      # reference: https://github.com/rodrigobdz/docker-compose-healthchecks?tab=readme-ov-file#minio-release2023-11-01t18-37-25z-and-older
+      test: timeout 5s bash -c ':> /dev/tcp/127.0.0.1/9002' || exit 1
+      interval: 1s
+      timeout: 10s
+      retries: 5
+    # Note there is no bucket by default
+    command: server --address 0.0.0.0:9002 --console-address 0.0.0.0:9003 /data
+
+  minio-manager:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    platform: linux/amd64
+    environment:
+      - MINIO_ENDPOINT=http://minio:9002
+      - MINIO_ROOT_USER=minio
+      - MINIO_ROOT_PASSWORD=minio123
+      - KBASE_AUTH_URL=https://ci.kbase.us/services/auth/
+      - KBASE_ADMIN_ROLES=CDM_JUPYTERHUB_ADMIN
+    ports:
+      - "8000:8000"
+    depends_on:
+      - minio

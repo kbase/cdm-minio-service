@@ -1,5 +1,5 @@
 """
-Pydantic models for the Spark Manager API.
+Pydantic models for the MinIO Manager API.
 """
 
 from typing import Annotated, Optional, List
