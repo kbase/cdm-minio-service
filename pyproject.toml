@@ -11,7 +11,7 @@ dependencies = [
     "httpx==0.28.1",
     "python-dotenv==1.1.0",
     "pydantic==2.11.5",
-    "aiohttp==3.12.12",
+    "aiohttp==3.12.13",
     "cacheout==0.16.0",
     "aiobotocore==2.23.0",
 ]
