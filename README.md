@@ -1,10 +1,20 @@
-# Template Repo
-Template for new KBase repositories
-For further info on using the KBase default repo template, 
-please see the [KBase Build & Release Guide](https://github.com/kbase/.github/tree/main/guide).
+# MinIO Manager Service
 
-## To Do:
+A centralized FastAPI service to manage MinIO users, groups, and policies for data governance with KBase authentication integration.
 
-- [ ] Update this README.md with info about your repository
-- [ ] Modify `Dockerfile` with needed steps (assuming repo produces a Docker image)
-- [ ] Ensure all [branch rules](https://github.com/kbase/.github/blob/develop/guide/enable-branch-rules.md) & [status checks](https://github.com/kbase/.github/blob/develop/guide/enable-branch-rules.md#require-status-checks) are enabled
+
+**Details to be added here**
+
+
+### Testing
+
+```bash
+# Install dependencies (only required on first run or when the uv.lock file changes)
+uv sync --locked
+
+# Run tests
+PYTHONPATH=. uv run pytest tests
+
+# Run with coverage
+PYTHONPATH=. uv run pytest --cov=src tests/
+```
