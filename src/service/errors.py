@@ -54,11 +54,11 @@ class ErrorType(Enum):
     CONFIGURATION_ERROR = (20060, "Configuration error")
     """ MinIO configuration is invalid. """
 
-    MINIO_TABLE_NOT_FOUND = (20070, "MinIO table not found")
-    """ The MinIO table was not found at the specified path. """
+    MINIO_PATH_NOT_FOUND = (20070, "MinIO path not found")
+    """ The MinIO path was not found at the specified path. """
 
-    MINIO_TABLE_OPERATION_ERROR = (20080, "MinIO table operation error")
-    """ An operation on a MinIO table failed. """
+    MINIO_OPERATION_ERROR = (20080, "MinIO operation error")
+    """ An operation on a MinIO path failed. """
 
     MINIO_QUERY_ERROR = (20090, "MinIO query error")
     """ There was an error executing a MinIO query. """
