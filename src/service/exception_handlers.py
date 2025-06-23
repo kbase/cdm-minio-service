@@ -41,9 +41,9 @@ async def universal_error_handler(request: Request, exc: Exception):
     Universal handler for all types of exceptions.
 
     Handles:
-    - MCPServerError and its subclasses:
+    - MinIOError and its subclasses:
         - Authentication errors (MissingTokenError, InvalidTokenError, etc.)
-        - Delta Lake errors (InvalidS3PathError, DeltaTableNotFoundError, etc.)
+        - MinIO specific errors (BucketOperationError, UserOperationError, etc.)
     - HTTPException from FastAPI
     - RequestValidationError for request validation
     - Generic exceptions
