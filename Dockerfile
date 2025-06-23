@@ -10,8 +10,9 @@ RUN apt-get update && apt-get install -y \
 
 # Install MinIO mc client
 ENV MC_VERSION=2025-05-21T01-59-54Z
-RUN wget -O /usr/local/bin/mc https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.${MC_VERSION} && \
-    chmod +x /usr/local/bin/mc
+ENV MC_PATH=/usr/local/bin/mc
+RUN wget -O ${MC_PATH} https://dl.min.io/client/mc/release/linux-amd64/archive/mc.RELEASE.${MC_VERSION} && \
+    chmod +x ${MC_PATH}
 
 # Install uv and Python dependencies
 RUN pip3 install --upgrade pip && \
