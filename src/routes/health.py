@@ -2,19 +2,26 @@
 Health check routes for the API.
 """
 
-from fastapi import APIRouter
+from typing import Annotated
 
-from src.service.models import HealthResponse
+from fastapi import APIRouter
+from pydantic import BaseModel, Field
 
 # Create a router for health endpoints
 router = APIRouter(tags=["health"])
 
 
+class HealthResponse(BaseModel):
+    """Health check response model."""
+
+    status: Annotated[str, Field(description="Health status")]
+
+
 @router.get(
-    "/health", 
+    "/health",
     response_model=HealthResponse,
     summary="Health check",
-    description="Returns the health status of the API."
+    description="Returns the health status of the API.",
 )
 async def health_check():
     """Health check endpoint."""
