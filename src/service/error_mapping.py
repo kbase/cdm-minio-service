@@ -11,19 +11,20 @@ from fastapi import status
 from src.service.errors import ErrorType
 from src.service.exceptions import (
     AuthenticationError,
+    BucketOperationError,
+    BucketValidationError,
+    ConfigurationError,
+    ConnectionError,
+    GroupOperationError,
     InvalidAuthHeaderError,
     InvalidTokenError,
     MinIOError,
+    MinIOManagerError,
     MissingRoleError,
     MissingTokenError,
-    # MinIO specific exceptions
-    MinIOManagerError,
     PolicyValidationError,
-    BucketOperationError,
     UserOperationError,
-    GroupOperationError,
-    ConnectionError,
-    ConfigurationError,
+    ValidationError,
 )
 
 _H400 = status.HTTP_400_BAD_REQUEST
@@ -59,6 +60,8 @@ _ERR_MAP = {
     GroupOperationError: ErrorMapping(ErrorType.GROUP_OPERATION_ERROR, _H400),
     ConnectionError: ErrorMapping(ErrorType.CONNECTION_ERROR, _H503),
     ConfigurationError: ErrorMapping(ErrorType.CONFIGURATION_ERROR, _H500),
+    BucketValidationError: ErrorMapping(ErrorType.BUCKET_VALIDATION_ERROR, _H400),
+    ValidationError: ErrorMapping(ErrorType.REQUEST_VALIDATION_FAILED, _H400),
     # Base error fallback
     MinIOError: ErrorMapping(ErrorType.MINIO_ERROR, _H500),
 }
