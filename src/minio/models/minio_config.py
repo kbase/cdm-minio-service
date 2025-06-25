@@ -65,7 +65,7 @@ class MinIOConfig(BaseModel):
         str,
         Field(
             min_length=1,
-            max_length=63,
+            max_length=1024,
             default=CDM_DEFAULT_WAREHOUSE_PREFIX,
             description="Prefix for user warehouse directories",
             examples=[CDM_DEFAULT_WAREHOUSE_PREFIX],
