@@ -66,9 +66,9 @@ def validate_path_prefix(prefix: str) -> str:
 
     stripped_prefix = prefix.strip()
 
-    if "/" in stripped_prefix or "\\" in stripped_prefix or ".." in stripped_prefix:
+    if "\\" in stripped_prefix or ".." in stripped_prefix:
         raise ValidationError(
-            f"Path prefix '{stripped_prefix}' cannot contain path separators ('/', '\\', '..')."
+            f"Path prefix '{stripped_prefix}' cannot contain path separators ('\\', '..')."
         )
 
     return stripped_prefix
