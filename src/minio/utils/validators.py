@@ -50,7 +50,7 @@ def validate_path_prefix(prefix: str) -> str:
     Validates a prefix to ensure it's a valid, non-empty path component.
 
     - Must not be empty or whitespace.
-    - Must not contain path separators to prevent security issues.
+    - Must not contain path separators ('\\' and '..') to prevent security issues.
 
     Args:
         prefix: The prefix string to validate.
