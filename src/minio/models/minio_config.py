@@ -53,6 +53,8 @@ class MinIOConfig(BaseModel):
     default_bucket: Annotated[
         str,
         Field(
+            min_length=3,
+            max_length=63,
             default=CDM_DEFAULT_BUCKET,
             description="Default bucket for system operations",
             examples=[CDM_DEFAULT_BUCKET],
@@ -62,6 +64,8 @@ class MinIOConfig(BaseModel):
     warehouse_prefix: Annotated[
         str,
         Field(
+            min_length=1,
+            max_length=63,
             default=CDM_DEFAULT_WAREHOUSE_PREFIX,
             description="Prefix for user warehouse directories",
             examples=[CDM_DEFAULT_WAREHOUSE_PREFIX],
