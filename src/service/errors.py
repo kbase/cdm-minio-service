@@ -39,6 +39,9 @@ class ErrorType(Enum):
     POLICY_VALIDATION_ERROR = (20015, "Policy validation error")
     """ Policy content validation failed. """
 
+    BUCKET_VALIDATION_ERROR = (20016, "Bucket validation error")
+    """ Bucket name or configuration validation failed. """
+
     BUCKET_OPERATION_ERROR = (20020, "Bucket operation error")
     """ A bucket operation failed. """
 
