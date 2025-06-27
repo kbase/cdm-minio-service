@@ -33,7 +33,7 @@ class MinIOClient:
         await self._initialize_session()
         return self
 
-    async def __aexit__(self, exc_type, exc_val, exc_tb):
+    async def __aexit__(self):
         """Async context manager exit."""
         await self._close_session()
 
