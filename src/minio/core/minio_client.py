@@ -54,10 +54,7 @@ class MinIOClient:
         if not self._session:
             await self._initialize_session()
 
-        if not self._session:
-            raise ConnectionError("Failed to initialize session")
-
-        async with self._session.create_client(
+        async with self._session.create_client(  # type: ignore
             "s3",
             endpoint_url=str(self.config.endpoint),
             aws_access_key_id=self.config.access_key,
