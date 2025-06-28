@@ -5,11 +5,7 @@ from typing import Any, AsyncIterator, List
 import aiobotocore.session
 from botocore.exceptions import ClientError
 
-from ...service.exceptions import (
-    BucketOperationError,
-    ConnectionError,
-    MinIOManagerError,
-)
+from ...service.exceptions import BucketOperationError, ConnectionError
 from ..models.minio_config import MinIOConfig
 
 logger = logging.getLogger(__name__)
@@ -98,7 +94,7 @@ class MinIOClient:
             True if the bucket was created successfully.
 
         Raises:
-            MinIOManagerError: If the bucket creation fails for any reason.
+            BucketOperationError: If the bucket creation fails for any reason.
         """
         try:
             async with self._get_client() as client:
@@ -107,7 +103,7 @@ class MinIOClient:
                 return True
         except Exception as e:
             logger.error(f"Unexpected error creating bucket {bucket_name}: {e}")
-            raise MinIOManagerError(f"Bucket creation failed: {e}") from e
+            raise BucketOperationError(f"Bucket creation failed: {e}") from e
 
     async def bucket_exists(self, bucket_name: str) -> bool:
         """
@@ -121,7 +117,6 @@ class MinIOClient:
 
         Raises:
             BucketOperationError: If the check fails for reasons other than a 404 error.
-            MinIOManagerError: For other unexpected errors.
         """
         try:
             async with self._get_client() as client:
@@ -137,7 +132,7 @@ class MinIOClient:
                 raise BucketOperationError(f"Bucket check failed: {e}") from e
         except Exception as e:
             logger.error(f"Unexpected error checking bucket {bucket_name}: {e}")
-            raise MinIOManagerError(f"Bucket check failed: {e}") from e
+            raise BucketOperationError(f"Bucket check failed: {e}") from e
 
     async def list_buckets(self) -> List[str]:
         """
@@ -147,7 +142,7 @@ class MinIOClient:
             A list of strings, where each string is a bucket name.
 
         Raises:
-            MinIOManagerError: If listing buckets fails.
+            BucketOperationError: If listing buckets fails.
         """
         try:
             async with self._get_client() as client:
@@ -157,7 +152,7 @@ class MinIOClient:
                 return buckets
         except Exception as e:
             logger.error(f"Failed to list buckets: {e}")
-            raise MinIOManagerError(f"Bucket listing failed: {e}") from e
+            raise BucketOperationError(f"Bucket listing failed: {e}") from e
 
     async def delete_bucket(self, bucket_name: str) -> bool:
         """
@@ -206,7 +201,7 @@ class MinIOClient:
             True if the object was uploaded successfully.
 
         Raises:
-            MinIOManagerError: If the upload operation fails.
+            BucketOperationError: If the upload operation fails.
         """
         try:
             async with self._get_client() as client:
@@ -215,7 +210,7 @@ class MinIOClient:
                 return True
         except Exception as e:
             logger.error(f"Failed to put object {key} in bucket {bucket_name}: {e}")
-            raise MinIOManagerError(f"Object put failed: {e}") from e
+            raise BucketOperationError(f"Object put failed: {e}") from e
 
     async def get_object(self, bucket_name: str, key: str) -> bytes:
         """
@@ -229,7 +224,7 @@ class MinIOClient:
             The content of the object as bytes.
 
         Raises:
-            MinIOManagerError: If the object retrieval fails.
+            BucketOperationError: If the object retrieval fails.
         """
         try:
             async with self._get_client() as client:
@@ -239,7 +234,7 @@ class MinIOClient:
                 return body
         except Exception as e:
             logger.error(f"Failed to get object {key} from bucket {bucket_name}: {e}")
-            raise MinIOManagerError(f"Object get failed: {e}") from e
+            raise BucketOperationError(f"Object get failed: {e}") from e
 
     async def delete_object(self, bucket_name: str, key: str) -> bool:
         """
@@ -253,7 +248,7 @@ class MinIOClient:
             True if the object was deleted successfully.
 
         Raises:
-            MinIOManagerError: If the object deletion fails.
+            BucketOperationError: If the object deletion fails.
         """
         try:
             async with self._get_client() as client:
@@ -264,7 +259,7 @@ class MinIOClient:
             logger.error(
                 f"Failed to delete object {key} from bucket {bucket_name}: {e}"
             )
-            raise MinIOManagerError(f"Object deletion failed: {e}") from e
+            raise BucketOperationError(f"Object deletion failed: {e}") from e
 
     async def list_objects(self, bucket_name: str, prefix: str = "") -> List[str]:
         """
@@ -278,7 +273,7 @@ class MinIOClient:
             A list of object keys (strings).
 
         Raises:
-            MinIOManagerError: If the object listing operation fails.
+            BucketOperationError: If the object listing operation fails.
         """
         try:
             async with self._get_client() as client:
@@ -295,4 +290,4 @@ class MinIOClient:
                 return objects
         except Exception as e:
             logger.error(f"Failed to list objects in bucket {bucket_name}: {e}")
-            raise MinIOManagerError(f"Object listing failed: {e}") from e
+            raise BucketOperationError(f"Object listing failed: {e}") from e
