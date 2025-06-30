@@ -85,15 +85,12 @@ class MinIOClient:
             logger.error(f"Connection test failed: {e}")
             return False
 
-    async def create_bucket(self, bucket_name: str) -> bool:
+    async def create_bucket(self, bucket_name: str) -> None:
         """
         Creates a new bucket on the MinIO server.
 
         Args:
             bucket_name: The name of the bucket to create.
-
-        Returns:
-            True if the bucket was created successfully.
 
         Raises:
             BucketOperationError: If the bucket creation fails for any reason.
@@ -102,7 +99,6 @@ class MinIOClient:
             async with self._get_client() as client:
                 await client.create_bucket(Bucket=bucket_name)
                 logger.info(f"Created bucket: {bucket_name}")
-                return True
         except Exception as e:
             logger.error(f"Unexpected error creating bucket {bucket_name}: {e}")
             raise BucketOperationError(f"Bucket creation failed: {e}") from e
@@ -157,7 +153,7 @@ class MinIOClient:
             logger.error(f"Failed to list buckets: {e}")
             raise BucketOperationError(f"Bucket listing failed: {e}") from e
 
-    async def delete_bucket(self, bucket_name: str) -> bool:
+    async def delete_bucket(self, bucket_name: str) -> None:
         """
         Deletes a bucket and all objects within it.
 
@@ -166,9 +162,6 @@ class MinIOClient:
 
         Args:
             bucket_name: The name of the bucket to delete.
-
-        Returns:
-            True if the bucket and its contents were successfully deleted.
 
         Raises:
             BucketOperationError: If the bucket deletion fails.
@@ -186,12 +179,11 @@ class MinIOClient:
 
                 await client.delete_bucket(Bucket=bucket_name)
                 logger.info(f"Deleted bucket: {bucket_name}")
-                return True
         except Exception as e:
             logger.error(f"Failed to delete bucket {bucket_name}: {e}")
             raise BucketOperationError(f"Bucket deletion failed: {e}") from e
 
-    async def put_object(self, bucket_name: str, key: str, body: bytes) -> bool:
+    async def put_object(self, bucket_name: str, key: str, body: bytes) -> None:
         """
         Uploads an object to a specified bucket.
 
@@ -202,9 +194,6 @@ class MinIOClient:
             key: The object key (i.e., its name/path within the bucket).
             body: The content of the object as bytes.
 
-        Returns:
-            True if the object was uploaded successfully.
-
         Raises:
             BucketOperationError: If the upload operation fails.
         """
@@ -212,7 +201,6 @@ class MinIOClient:
             async with self._get_client() as client:
                 await client.put_object(Bucket=bucket_name, Key=key, Body=body)
                 logger.info(f"Put object {key} in bucket {bucket_name}")
-                return True
         except Exception as e:
             logger.error(f"Failed to put object {key} in bucket {bucket_name}: {e}")
             raise BucketOperationError(f"Object put failed: {e}") from e
@@ -242,16 +230,13 @@ class MinIOClient:
             logger.error(f"Failed to get object {key} from bucket {bucket_name}: {e}")
             raise BucketOperationError(f"Object get failed: {e}") from e
 
-    async def delete_object(self, bucket_name: str, key: str) -> bool:
+    async def delete_object(self, bucket_name: str, key: str) -> None:
         """
         Deletes a single object from a bucket.
 
         Args:
             bucket_name: The name of the bucket containing the object.
             key: The key of the object to delete.
-
-        Returns:
-            True if the object was deleted successfully.
 
         Raises:
             BucketOperationError: If the object deletion fails.
@@ -260,7 +245,6 @@ class MinIOClient:
             async with self._get_client() as client:
                 await client.delete_object(Bucket=bucket_name, Key=key)
                 logger.info(f"Deleted object {key} from bucket {bucket_name}")
-                return True
         except Exception as e:
             logger.error(
                 f"Failed to delete object {key} from bucket {bucket_name}: {e}"
