@@ -10,6 +10,8 @@ from ..models.minio_config import MinIOConfig
 
 logger = logging.getLogger(__name__)
 
+MAX_LIST_OBJECTS_COUNT = 10 * 1000  # 10k objects
+
 
 class MinIOClient:
     """MinIO Client Wrapper."""
@@ -268,13 +270,14 @@ class MinIOClient:
         """
         Lists objects in a bucket, optionally filtered by a prefix.
         NOTE: This method is not designed to be used for listing large number of objects.
+        It will stop listing after MAX_LIST_OBJECTS_COUNT objects to prevent memory issues.
 
         Args:
             bucket_name: The name of the bucket to list objects from.
             prefix: An optional prefix to filter the object keys.
 
         Returns:
-            A list of object keys (strings).
+            A list of object keys (strings), limited to MAX_LIST_OBJECTS_COUNT items.
 
         Raises:
             BucketOperationError: If the object listing operation fails.
@@ -286,10 +289,23 @@ class MinIOClient:
 
                 async for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
                     if "Contents" in page:
-                        objects.extend([obj["Key"] for obj in page["Contents"]])
+                        page_objects = [obj["Key"] for obj in page["Contents"]]
+                        
+                        # Check if adding this page would exceed the limit
+                        if len(objects) + len(page_objects) > MAX_LIST_OBJECTS_COUNT:
+                            # Add only what we can without exceeding the limit
+                            remaining_slots = MAX_LIST_OBJECTS_COUNT - len(objects)
+                            objects.extend(page_objects[:remaining_slots])
+                            logger.warning(
+                                f"Object listing stopped at {MAX_LIST_OBJECTS_COUNT} objects limit "
+                                f"for bucket {bucket_name} with prefix '{prefix}'"
+                            )
+                            break
+                        
+                        objects.extend(page_objects)
 
                 logger.info(
-                    f"Listed {len(objects)} objects in bucket {bucket_name} with prefix {prefix}"
+                    f"Listed {len(objects)} objects in bucket {bucket_name} with prefix '{prefix}'"
                 )
                 return objects
         except Exception as e:
