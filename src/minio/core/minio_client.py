@@ -1,10 +1,11 @@
 import logging
 from contextlib import asynccontextmanager
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, List
 
 import aiobotocore.session
+from botocore.exceptions import ClientError
 
-from ...service.exceptions import ConnectionError
+from ...service.exceptions import BucketOperationError, ConnectionError
 from ..models.minio_config import MinIOConfig
 
 logger = logging.getLogger(__name__)
@@ -81,3 +82,212 @@ class MinIOClient:
         except Exception as e:
             logger.error(f"Connection test failed: {e}")
             return False
+
+    async def create_bucket(self, bucket_name: str) -> bool:
+        """
+        Creates a new bucket on the MinIO server.
+
+        Args:
+            bucket_name: The name of the bucket to create.
+
+        Returns:
+            True if the bucket was created successfully.
+
+        Raises:
+            BucketOperationError: If the bucket creation fails for any reason.
+        """
+        try:
+            async with self._get_client() as client:
+                await client.create_bucket(Bucket=bucket_name)
+                logger.info(f"Created bucket: {bucket_name}")
+                return True
+        except Exception as e:
+            logger.error(f"Unexpected error creating bucket {bucket_name}: {e}")
+            raise BucketOperationError(f"Bucket creation failed: {e}") from e
+
+    async def bucket_exists(self, bucket_name: str) -> bool:
+        """
+        Checks if a bucket exists by sending a HEAD request.
+
+        Args:
+            bucket_name: The name of the bucket to check.
+
+        Returns:
+            True if the bucket exists, False otherwise.
+
+        Raises:
+            BucketOperationError: If the check fails for reasons other than a 404 error.
+        """
+        try:
+            async with self._get_client() as client:
+                await client.head_bucket(Bucket=bucket_name)
+                return True
+        except ClientError as e:
+            # Reference: https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html
+            # The bucket does not exist or you do not have permission to access it
+            if e.response["Error"]["Code"] == "404":
+                return False
+            else:
+                logger.error(f"Error checking bucket {bucket_name}: {e}")
+                raise BucketOperationError(f"Bucket check failed: {e}") from e
+        except Exception as e:
+            logger.error(f"Unexpected error checking bucket {bucket_name}: {e}")
+            raise BucketOperationError(f"Bucket check failed: {e}") from e
+
+    async def list_buckets(self) -> List[str]:
+        """
+        Retrieves a list of all bucket names from the MinIO server.
+
+        Returns:
+            A list of strings, where each string is a bucket name.
+
+        Raises:
+            BucketOperationError: If listing buckets fails.
+        """
+        try:
+            async with self._get_client() as client:
+                response = await client.list_buckets()
+                buckets = [bucket["Name"] for bucket in response.get("Buckets", [])]
+                logger.info(f"Listed {len(buckets)} buckets")
+                return buckets
+        except Exception as e:
+            logger.error(f"Failed to list buckets: {e}")
+            raise BucketOperationError(f"Bucket listing failed: {e}") from e
+
+    async def delete_bucket(self, bucket_name: str) -> bool:
+        """
+        Deletes a bucket and all objects within it.
+
+        This operation first lists and deletes all objects in the bucket before
+        deleting the bucket itself.
+
+        Args:
+            bucket_name: The name of the bucket to delete.
+
+        Returns:
+            True if the bucket and its contents were successfully deleted.
+
+        Raises:
+            BucketOperationError: If the bucket deletion fails.
+        """
+        try:
+            async with self._get_client() as client:
+                # Always delete all objects first
+                paginator = client.get_paginator("list_objects_v2")
+                async for page in paginator.paginate(Bucket=bucket_name):
+                    if "Contents" in page:
+                        objects = [{"Key": obj["Key"]} for obj in page["Contents"]]
+                        await client.delete_objects(
+                            Bucket=bucket_name, Delete={"Objects": objects}
+                        )
+
+                await client.delete_bucket(Bucket=bucket_name)
+                logger.info(f"Deleted bucket: {bucket_name}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to delete bucket {bucket_name}: {e}")
+            raise BucketOperationError(f"Bucket deletion failed: {e}") from e
+
+    async def put_object(self, bucket_name: str, key: str, body: bytes) -> bool:
+        """
+        Uploads an object to a specified bucket.
+
+        Args:
+            bucket_name: The name of the target bucket.
+            key: The object key (i.e., its name/path within the bucket).
+            body: The content of the object as bytes.
+
+        Returns:
+            True if the object was uploaded successfully.
+
+        Raises:
+            BucketOperationError: If the upload operation fails.
+        """
+        try:
+            async with self._get_client() as client:
+                await client.put_object(Bucket=bucket_name, Key=key, Body=body)
+                logger.info(f"Put object {key} in bucket {bucket_name}")
+                return True
+        except Exception as e:
+            logger.error(f"Failed to put object {key} in bucket {bucket_name}: {e}")
+            raise BucketOperationError(f"Object put failed: {e}") from e
+
+    async def get_object(self, bucket_name: str, key: str) -> bytes:
+        """
+        Retrieves an object from a bucket.
+
+        Args:
+            bucket_name: The name of the bucket containing the object.
+            key: The key of the object to retrieve.
+
+        Returns:
+            The content of the object as bytes.
+
+        Raises:
+            BucketOperationError: If the object retrieval fails.
+        """
+        try:
+            async with self._get_client() as client:
+                response = await client.get_object(Bucket=bucket_name, Key=key)
+                body = await response["Body"].read()
+                logger.info(f"Got object {key} from bucket {bucket_name}")
+                return body
+        except Exception as e:
+            logger.error(f"Failed to get object {key} from bucket {bucket_name}: {e}")
+            raise BucketOperationError(f"Object get failed: {e}") from e
+
+    async def delete_object(self, bucket_name: str, key: str) -> bool:
+        """
+        Deletes a single object from a bucket.
+
+        Args:
+            bucket_name: The name of the bucket containing the object.
+            key: The key of the object to delete.
+
+        Returns:
+            True if the object was deleted successfully.
+
+        Raises:
+            BucketOperationError: If the object deletion fails.
+        """
+        try:
+            async with self._get_client() as client:
+                await client.delete_object(Bucket=bucket_name, Key=key)
+                logger.info(f"Deleted object {key} from bucket {bucket_name}")
+                return True
+        except Exception as e:
+            logger.error(
+                f"Failed to delete object {key} from bucket {bucket_name}: {e}"
+            )
+            raise BucketOperationError(f"Object deletion failed: {e}") from e
+
+    async def list_objects(self, bucket_name: str, prefix: str = "") -> List[str]:
+        """
+        Lists objects in a bucket, optionally filtered by a prefix.
+
+        Args:
+            bucket_name: The name of the bucket to list objects from.
+            prefix: An optional prefix to filter the object keys.
+
+        Returns:
+            A list of object keys (strings).
+
+        Raises:
+            BucketOperationError: If the object listing operation fails.
+        """
+        try:
+            async with self._get_client() as client:
+                paginator = client.get_paginator("list_objects_v2")
+                objects = []
+
+                async for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
+                    if "Contents" in page:
+                        objects.extend([obj["Key"] for obj in page["Contents"]])
+
+                logger.info(
+                    f"Listed {len(objects)} objects in bucket {bucket_name} with prefix {prefix}"
+                )
+                return objects
+        except Exception as e:
+            logger.error(f"Failed to list objects in bucket {bucket_name}: {e}")
+            raise BucketOperationError(f"Object listing failed: {e}") from e
