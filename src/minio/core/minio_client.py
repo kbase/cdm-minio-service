@@ -126,7 +126,6 @@ class MinIOClient:
                 return True
         except ClientError as e:
             # Reference: https://docs.aws.amazon.com/AmazonS3/latest/API/API_HeadBucket.html
-            # The bucket does not exist or you do not have permission to access it
             if e.response["Error"]["Code"] == "404":
                 return False
             else:
