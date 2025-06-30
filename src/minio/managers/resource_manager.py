@@ -92,11 +92,6 @@ class ResourceManager(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def get_resource_name_field(self) -> str:
-        """Get the field name used for resource identification (e.g., 'username', 'group_name')."""
-        pass
-
-    @abstractmethod
     def validate_resource_name(self, name: str) -> str:
         """
         Validate and normalize a resource name.
