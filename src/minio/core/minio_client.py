@@ -111,6 +111,8 @@ class MinIOClient:
         """
         Checks if a bucket exists by sending a HEAD request.
 
+        NOTE: This method is designed to be used by minIO admin only where we have access to all buckets.
+
         Args:
             bucket_name: The name of the bucket to check.
 
