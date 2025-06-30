@@ -192,6 +192,8 @@ class MinIOClient:
         """
         Uploads an object to a specified bucket.
 
+        NOTE: This method is not designed to be used for uploading large objects.
+
         Args:
             bucket_name: The name of the target bucket.
             key: The object key (i.e., its name/path within the bucket).
@@ -215,6 +217,7 @@ class MinIOClient:
     async def get_object(self, bucket_name: str, key: str) -> bytes:
         """
         Retrieves an object from a bucket.
+        NOTE: This method is not designed to be used for retrieving large objects.
 
         Args:
             bucket_name: The name of the bucket containing the object.
@@ -264,6 +267,7 @@ class MinIOClient:
     async def list_objects(self, bucket_name: str, prefix: str = "") -> List[str]:
         """
         Lists objects in a bucket, optionally filtered by a prefix.
+        NOTE: This method is not designed to be used for listing large number of objects.
 
         Args:
             bucket_name: The name of the bucket to list objects from.
