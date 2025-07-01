@@ -155,30 +155,3 @@ class ResourceManager(ABC, Generic[T]):
             List of resource names
         """
         pass
-
-    @abstractmethod
-    async def create_resource_model(self, name: str, **kwargs) -> T:
-        """
-        Create the resource model after successful creation.
-
-        Args:
-            name: Resource name
-            **kwargs: Additional arguments for model creation
-
-        Returns:
-            Resource model instance
-        """
-        pass
-
-    @abstractmethod
-    async def get_resource_model(self, name: str) -> Optional[T]:
-        """
-        Get the resource model for an existing resource.
-
-        Args:
-            name: Resource name
-
-        Returns:
-            Resource model instance or None if not found
-        """
-        pass
