@@ -20,7 +20,6 @@ class PolicyAction(str, Enum):
     """Policy management actions."""
 
     CREATE = "create"
-    REMOVE = "remove"
     DELETE = "remove"  # MC uses 'remove' not 'delete'
     LIST = "list"
     INFO = "info"
