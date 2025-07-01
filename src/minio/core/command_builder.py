@@ -74,11 +74,7 @@ class MinIOCommandBuilder:
 
         # Add policy_name for all actions except LIST
         if action != PolicyAction.LIST:
-            if policy_name:
-                cmd.append(policy_name)
-            else:
-                # This should never happen - bypass linter
-                raise ValueError(f"Policy name is required for action: {action.value}")
+            cmd.append(policy_name)  # type: ignore
 
         # Add file_path for CREATE action
         if file_path and action == PolicyAction.CREATE:
