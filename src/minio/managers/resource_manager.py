@@ -87,12 +87,12 @@ class ResourceManager(ABC, Generic[T]):
     # === Abstract Methods (must be implemented by subclasses) ===
 
     @abstractmethod
-    def get_resource_type(self) -> str:
+    def _get_resource_type(self) -> str:
         """Get the resource type name (e.g., 'user', 'group', 'policy')."""
         pass
 
     @abstractmethod
-    def validate_resource_name(self, name: str) -> str:
+    def _validate_resource_name(self, name: str) -> str:
         """
         Validate and normalize a resource name.
 
@@ -108,7 +108,7 @@ class ResourceManager(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def build_exists_command(self, name: str) -> List[str]:
+    def _build_exists_command(self, name: str) -> List[str]:
         """
         Build command to check if resource exists.
 
@@ -121,7 +121,7 @@ class ResourceManager(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def build_list_command(self) -> List[str]:
+    def _build_list_command(self) -> List[str]:
         """
         Build command to list all resources.
 
@@ -131,7 +131,7 @@ class ResourceManager(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def build_delete_command(self, name: str) -> List[str]:
+    def _build_delete_command(self, name: str) -> List[str]:
         """
         Build command to delete a resource.
 
@@ -144,7 +144,7 @@ class ResourceManager(ABC, Generic[T]):
         pass
 
     @abstractmethod
-    def parse_list_output(self, stdout: str) -> List[str]:
+    def _parse_list_output(self, stdout: str) -> List[str]:
         """
         Parse command output to extract resource names.
 
