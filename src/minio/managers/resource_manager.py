@@ -155,3 +155,141 @@ class ResourceManager(ABC, Generic[T]):
             List of resource names
         """
         pass
+
+    # === Generic CRUD Operations ===
+
+    async def resource_exists(self, name: str) -> bool:
+        """
+        Check if a resource exists.
+
+        Args:
+            name: Resource name
+
+        Returns:
+            True if resource exists, False otherwise
+        """
+        async with self.operation_context(f"check_{self._get_resource_type()}_exists"):
+            try:
+                validated_name = self._validate_resource_name(name)
+                cmd_args = self._build_exists_command(validated_name)
+                result = await self._executor._execute_command(cmd_args)
+                return result.success
+            except Exception as e:
+                self.logger.warning(
+                    f"Error checking if {self._get_resource_type()} {name} exists: {e}"
+                )
+                return False
+
+    async def list_resources(self, name_filter: Optional[str] = None) -> List[str]:
+        """
+        List all resources with optional filtering.
+
+        Args:
+            name_filter: Optional filter to apply to resource names
+
+        Returns:
+            List of resource names
+        """
+        async with self.operation_context(f"list_{self._get_resource_type()}s"):
+            try:
+                cmd_args = self._build_list_command()
+                result = await self._executor._execute_command(cmd_args)
+
+                if not result.success:
+                    self.logger.warning(
+                        f"Failed to list {self._get_resource_type()}s: {result.stderr}"
+                    )
+                    return []
+
+                resource_names = self._parse_list_output(result.stdout)
+
+                # Apply name filter if provided
+                if name_filter:
+                    resource_names = [
+                        name
+                        for name in resource_names
+                        if name_filter.lower() in name.lower()
+                    ]
+
+                self.logger.info(
+                    f"Found {len(resource_names)} {self._get_resource_type()}s"
+                )
+                return sorted(resource_names)
+
+            except Exception as e:
+                self.logger.error(f"Error listing {self._get_resource_type()}s: {e}")
+                return []
+
+    async def delete_resource(self, name: str, force: bool = False) -> bool:
+        """
+        Delete a resource.
+
+        Args:
+            name: Resource name
+            force: Force deletion even if resource has dependencies
+
+        Returns:
+            True if successfully deleted, False otherwise
+        """
+        async with self.operation_context(f"delete_{self._get_resource_type()}"):
+            try:
+                validated_name = self._validate_resource_name(name)
+
+                # Check if resource exists before attempting deletion
+                if not await self.resource_exists(validated_name):
+                    self.logger.warning(
+                        f"{self._get_resource_type().title()} {validated_name} does not exist"
+                    )
+                    return False
+
+                # Perform pre-deletion cleanup if needed
+                await self._pre_delete_cleanup(validated_name, force)
+
+                # Execute delete command
+                cmd_args = self._build_delete_command(validated_name)
+                result = await self._executor._execute_command(cmd_args)
+
+                if not result.success:
+                    self.logger.error(
+                        f"Failed to delete {self._get_resource_type()} {validated_name}: {result.stderr}"
+                    )
+                    return False
+
+                # Perform post-deletion cleanup if needed
+                await self._post_delete_cleanup(validated_name)
+
+                self.logger.info(
+                    f"Successfully deleted {self._get_resource_type()} {validated_name}"
+                )
+                return True
+
+            except Exception as e:
+                self.logger.error(
+                    f"Error deleting {self._get_resource_type()} {name}: {e}"
+                )
+                return False
+
+    # === Helper Methods ===
+
+    async def _pre_delete_cleanup(self, name: str, force: bool = False) -> None:
+        """
+        Perform any necessary cleanup before deleting a resource.
+
+        Subclasses can override this to implement specific cleanup logic.
+
+        Args:
+            name: Resource name
+            force: Whether to force cleanup
+        """
+        pass
+
+    async def _post_delete_cleanup(self, name: str) -> None:
+        """
+        Perform any necessary cleanup after deleting a resource.
+
+        Subclasses can override this to implement specific cleanup logic.
+
+        Args:
+            name: Resource name
+        """
+        pass
