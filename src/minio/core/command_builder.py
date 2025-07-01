@@ -49,21 +49,39 @@ class MinIOCommandBuilder:
 
         Args:
             action: Policy action to perform
-            policy_name: Policy name
-            file_path: Policy file path (for create action)
+            policy_name: Policy name (required for all actions except LIST)
+            file_path: Policy file path (required for CREATE action)
 
         Returns:
             Command arguments list
+
+        Raises:
+            ValueError: If policy_name is not provided for actions that require it
         """
+
+        if action != PolicyAction.LIST and not policy_name:
+            raise ValueError(f"Policy name is required for action: {action.value}")
+
+        if action == PolicyAction.CREATE and not file_path:
+            raise ValueError("File path is required for CREATE action")
+
         cmd = [
             "admin",
             AdminCommand.POLICY.value,
             action.value,
             self.alias,
         ]
-        # Only add policy_name if it's provided (LIST doesn't need it)
-        if policy_name is not None:
-            cmd.append(policy_name)
+
+        # Add policy_name for all actions except LIST
+        if action != PolicyAction.LIST:
+            if policy_name:
+                cmd.append(policy_name)
+            else:
+                # This should never happen - bypass linter
+                raise ValueError(f"Policy name is required for action: {action.value}")
+
+        # Add file_path for CREATE action
         if file_path and action == PolicyAction.CREATE:
             cmd.append(file_path)
+
         return cmd
