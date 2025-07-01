@@ -1,8 +1,8 @@
 """Command builders for MinIO MC operations."""
 
-from typing import List
+from typing import List, Optional
 
-from ..models.command import AdminCommand
+from ..models.command import AdminCommand, PolicyAction
 
 
 class MinIOCommandBuilder:
@@ -37,3 +37,33 @@ class MinIOCommandBuilder:
             access_key,
             secret_key,
         ]
+
+    # Policy Management Commands
+    def build_policy_command(
+        self,
+        action: PolicyAction,
+        policy_name: Optional[str] = None,
+        file_path: Optional[str] = None,
+    ) -> List[str]:
+        """Build policy management command.
+
+        Args:
+            action: Policy action to perform
+            policy_name: Policy name
+            file_path: Policy file path (for create action)
+
+        Returns:
+            Command arguments list
+        """
+        cmd = [
+            "admin",
+            AdminCommand.POLICY.value,
+            action.value,
+            self.alias,
+        ]
+        # Only add policy_name if it's provided (LIST doesn't need it)
+        if policy_name is not None:
+            cmd.append(policy_name)
+        if file_path and action == PolicyAction.CREATE:
+            cmd.append(file_path)
+        return cmd

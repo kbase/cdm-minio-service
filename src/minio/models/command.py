@@ -16,6 +16,26 @@ class AdminCommand(str, Enum):
     ALIAS = "alias"
 
 
+class PolicyAction(str, Enum):
+    """Policy management actions."""
+
+    CREATE = "create"
+    REMOVE = "remove"
+    DELETE = "remove"  # MC uses 'remove' not 'delete'
+    LIST = "list"
+    INFO = "info"
+    ATTACH = "attach"
+    DETACH = "detach"
+    ENTITIES = "entities"
+
+    # S3 Action Constants
+    ALL_ACTIONS = "s3:*"
+    GET_OBJECT = "s3:GetObject"
+    PUT_OBJECT = "s3:PutObject"
+    DELETE_OBJECT = "s3:DeleteObject"
+    LIST_BUCKET = "s3:ListBucket"
+
+
 class CommandResult(BaseModel):
     """Result of a MinIO command execution."""
 
