@@ -129,6 +129,16 @@ class PolicyManager(ResourceManager[PolicyModel]):
             logger.info(f"Created {target_type.value} policy: {policy_name}")
             return policy_model
 
+    # === CONVENIENCE METHODS FOR USER/GROUP POLICIES ===
+
+    async def create_user_policy(self, username: str) -> PolicyModel:
+        """Create a default policy for a user."""
+        return await self.create_policy(TargetType.USER, username)
+
+    async def create_group_policy(self, group_name: str) -> PolicyModel:
+        """Create a default policy for a group."""
+        return await self.create_policy(TargetType.GROUP, group_name)
+
     # === PRIVATE HELPER METHODS ===
     def _get_policy_name(self, target_type: TargetType, target_name: str) -> str:
         """Generate standardized policy name."""
