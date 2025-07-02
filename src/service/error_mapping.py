@@ -23,6 +23,7 @@ from src.service.exceptions import (
     MissingRoleError,
     MissingTokenError,
     PolicyValidationError,
+    PolicyOperationError,
     UserOperationError,
     ValidationError,
 )
@@ -55,6 +56,7 @@ _ERR_MAP = {
     # MinIO specific errors
     MinIOManagerError: ErrorMapping(ErrorType.MINIO_MANAGER_ERROR, _H500),
     PolicyValidationError: ErrorMapping(ErrorType.POLICY_VALIDATION_ERROR, _H400),
+    PolicyOperationError: ErrorMapping(ErrorType.POLICY_OPERATION_ERROR, _H500),
     BucketOperationError: ErrorMapping(ErrorType.BUCKET_OPERATION_ERROR, _H500),
     UserOperationError: ErrorMapping(ErrorType.USER_OPERATION_ERROR, _H400),
     GroupOperationError: ErrorMapping(ErrorType.GROUP_OPERATION_ERROR, _H400),
