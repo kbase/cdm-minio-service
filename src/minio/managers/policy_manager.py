@@ -161,12 +161,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         # Build resource ARNs from paths
         resources = []
         for path in resource_paths:
-            resources.extend(
-                [
-                    f"arn:aws:s3:::{self.config.default_bucket}/{path}",
-                    f"arn:aws:s3:::{self.config.default_bucket}/{path}/*",
-                ]
-            )
+            resources.append(f"arn:aws:s3:::{self.config.default_bucket}/{path}/*")
 
         policy_doc = PolicyDocument(
             statement=[
