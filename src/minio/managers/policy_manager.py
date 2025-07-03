@@ -147,18 +147,26 @@ class PolicyManager(ResourceManager[PolicyModel]):
         # Build resource paths based on target type
         resource_paths = []
         if target_type == TargetType.USER:
-            resource_paths.extend([
-                f"{self.config.users_sql_warehouse_prefix}/{target_name}",
-                f"{self.config.users_general_warehouse_prefix}/{target_name}"
-            ])
+            resource_paths.extend(
+                [
+                    f"{self.config.users_sql_warehouse_prefix}/{target_name}",
+                    f"{self.config.users_general_warehouse_prefix}/{target_name}",
+                ]
+            )
         else:  # GROUP
             resource_paths.append(
                 f"{self.config.groups_general_warehouse_prefix}/{target_name}"
             )
 
         # Build resource ARNs from paths
-        resources = [f"arn:aws:s3:::{self.config.default_bucket}/{path}/*" for path in resource_paths]
-        resources.append(f"arn:aws:s3:::{self.config.default_bucket}")
+        resources = []
+        for path in resource_paths:
+            resources.extend(
+                [
+                    f"arn:aws:s3:::{self.config.default_bucket}/{path}",
+                    f"arn:aws:s3:::{self.config.default_bucket}/{path}/*",
+                ]
+            )
 
         policy_doc = PolicyDocument(
             statement=[
