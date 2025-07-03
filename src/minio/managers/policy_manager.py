@@ -144,10 +144,21 @@ class PolicyManager(ResourceManager[PolicyModel]):
         self, target_type: TargetType, target_name: str, policy_name: str
     ) -> PolicyModel:
         """Build default policy for user or group."""
+        # Build resource paths based on target type
+        resource_paths = []
         if target_type == TargetType.USER:
-            resource_path = f"{self.config.users_warehouse_prefix}/{target_name}"
+            resource_paths.extend([
+                f"{self.config.users_sql_warehouse_prefix}/{target_name}",
+                f"{self.config.users_general_warehouse_prefix}/{target_name}"
+            ])
         else:  # GROUP
-            resource_path = f"{self.config.groups_warehouse_prefix}/{target_name}"
+            resource_paths.append(
+                f"{self.config.groups_general_warehouse_prefix}/{target_name}"
+            )
+
+        # Build resource ARNs from paths
+        resources = [f"arn:aws:s3:::{self.config.default_bucket}/{path}/*" for path in resource_paths]
+        resources.append(f"arn:aws:s3:::{self.config.default_bucket}")
 
         policy_doc = PolicyDocument(
             statement=[
@@ -159,10 +170,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
                         PolicyAction.DELETE_OBJECT,
                         PolicyAction.LIST_BUCKET,
                     ],
-                    resource=[
-                        f"arn:aws:s3:::{self.config.default_bucket}/{resource_path}/*",
-                        f"arn:aws:s3:::{self.config.default_bucket}",
-                    ],
+                    resource=resources,
                     condition=None,
                     principal=None,
                 )

@@ -8,15 +8,19 @@ from ..utils.validators import validate_bucket_name, validate_path_prefix
 
 CDM_DEFAULT_BUCKET = os.getenv("CDM_DEFAULT_BUCKET", "cdm-lake")
 
-# Default warehouse prefix for users - this is where user created DB/tables are stored
-# e.g. s3a://cdm-lake/users-warehouse/{username}
-CDM_DEFAULT_USERS_WAREHOUSE_PREFIX = os.getenv(
-    "CDM_DEFAULT_USERS_WAREHOUSE_PREFIX", "users-warehouse"
+# Default Spark SQL warehouse prefix for users - this is where user created DB/tables are stored
+# e.g. s3a://cdm-lake/users-sql-warehouse/{username}
+CDM_DEFAULT_USERS_SQL_WAREHOUSE_PREFIX = os.getenv(
+    "CDM_DEFAULT_USERS_SQL_WAREHOUSE_PREFIX", "users-sql-warehouse"
 )
-# Default warehouse prefix for groups - this is used for group shared data
-# e.g. s3a://cdm-lake/groups-warehouse/{group_name}
-CDM_DEFAULT_GROUPS_WAREHOUSE_PREFIX = os.getenv(
-    "CDM_DEFAULT_GROUPS_WAREHOUSE_PREFIX", "groups-warehouse"
+# Default general warehouse prefix for users/groups - this is used for user/group general data files (e.g. csv, tsv, etc.)
+# e.g. s3a://cdm-lake/users-general-warehouse/{username} or s3a://cdm-lake/groups-general-warehouse/{group_name}
+CDM_DEFAULT_USERS_GENERAL_WAREHOUSE_PREFIX = os.getenv(
+    "CDM_DEFAULT_USERS_GENERAL_WAREHOUSE_PREFIX", "users-general-warehouse"
+)
+
+CDM_DEFAULT_GROUPS_GENERAL_WAREHOUSE_PREFIX = os.getenv(
+    "CDM_DEFAULT_GROUPS_GENERAL_WAREHOUSE_PREFIX", "groups-general-warehouse"
 )
 
 
@@ -71,41 +75,43 @@ class MinIOConfig(BaseModel):
         ),
     ] = CDM_DEFAULT_BUCKET
 
-    users_warehouse_prefix: Annotated[
+    users_sql_warehouse_prefix: Annotated[
         str,
         Field(
             min_length=1,
             max_length=1024,
-            default=CDM_DEFAULT_USERS_WAREHOUSE_PREFIX,
-            description="Prefix for user warehouse directories",
-            examples=[CDM_DEFAULT_USERS_WAREHOUSE_PREFIX],
+            default=CDM_DEFAULT_USERS_SQL_WAREHOUSE_PREFIX,
+            description="Prefix for user SparkSQL warehouse directories",
+            examples=[CDM_DEFAULT_USERS_SQL_WAREHOUSE_PREFIX],
         ),
-    ] = CDM_DEFAULT_USERS_WAREHOUSE_PREFIX
+    ] = CDM_DEFAULT_USERS_SQL_WAREHOUSE_PREFIX
 
-    groups_warehouse_prefix: Annotated[
+    users_general_warehouse_prefix: Annotated[
         str,
         Field(
             min_length=1,
             max_length=1024,
-            default=CDM_DEFAULT_GROUPS_WAREHOUSE_PREFIX,
-            description="Prefix for group warehouse directories",
-            examples=[CDM_DEFAULT_GROUPS_WAREHOUSE_PREFIX],
+            default=CDM_DEFAULT_USERS_GENERAL_WAREHOUSE_PREFIX,
+            description="Prefix for user general warehouse directories",
+            examples=[CDM_DEFAULT_USERS_GENERAL_WAREHOUSE_PREFIX],
         ),
-    ] = CDM_DEFAULT_GROUPS_WAREHOUSE_PREFIX
+    ] = CDM_DEFAULT_USERS_GENERAL_WAREHOUSE_PREFIX
 
-    @field_validator("users_warehouse_prefix")
-    @classmethod
-    def validate_users_warehouse_prefix_str(cls, v: str) -> str:
-        """Validate the users_warehouse_prefix using the project's custom validator."""
-        try:
-            return validate_path_prefix(v)
-        except ValidationError as e:
-            raise ValueError(str(e))
+    groups_general_warehouse_prefix: Annotated[
+        str,
+        Field(
+            min_length=1,
+            max_length=1024,
+            default=CDM_DEFAULT_GROUPS_GENERAL_WAREHOUSE_PREFIX,
+            description="Prefix for group general warehouse directories",
+            examples=[CDM_DEFAULT_GROUPS_GENERAL_WAREHOUSE_PREFIX],
+        ),
+    ] = CDM_DEFAULT_GROUPS_GENERAL_WAREHOUSE_PREFIX
 
-    @field_validator("groups_warehouse_prefix")
+    @field_validator("users_sql_warehouse_prefix", "users_general_warehouse_prefix", "groups_general_warehouse_prefix")
     @classmethod
-    def validate_groups_warehouse_prefix_str(cls, v: str) -> str:
-        """Validate the groups_warehouse_prefix using the project's custom validator."""
+    def validate_users_sql_warehouse_prefix_str(cls, v: str) -> str:
+        """Validate the users_sql_warehouse_prefix using the project's custom validator."""
         try:
             return validate_path_prefix(v)
         except ValidationError as e:
