@@ -26,10 +26,6 @@ RESERVED_POLICIES = {
 }
 RESOURCE_TYPE = "policy"
 
-# MinIO group path prefix - this is the default group path prefix
-# e.g. s3a://cdm-lake/warehouse/groups/group_name/
-GROUP_PREFIX = "groups"
-
 
 class TargetType(str, Enum):
     """Target types for policy operations."""
