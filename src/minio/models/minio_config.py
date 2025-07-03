@@ -110,8 +110,8 @@ class MinIOConfig(BaseModel):
 
     @field_validator("users_sql_warehouse_prefix", "users_general_warehouse_prefix", "groups_general_warehouse_prefix")
     @classmethod
-    def validate_users_sql_warehouse_prefix_str(cls, v: str) -> str:
-        """Validate the users_sql_warehouse_prefix using the project's custom validator."""
+    def validate_warehouse_prefix_str(cls, v: str) -> str:
+        """Validate a  warehouse prefix using the project's custom validator."""
         try:
             return validate_path_prefix(v)
         except ValidationError as e:
