@@ -150,15 +150,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Build default policy for user or group."""
         if target_type == TargetType.USER:
             resource_path = f"{self.config.users_warehouse_prefix}/{target_name}"
-            sid_suffix = f"UserHomeAccess-{target_name}"
         else:  # GROUP
             resource_path = f"{self.config.groups_warehouse_prefix}/{target_name}"
-            sid_suffix = f"GroupSharedAccess-{target_name}"
 
         policy_doc = PolicyDocument(
             statement=[
                 PolicyStatement(
-                    sid=sid_suffix,
                     effect=PolicyEffect.ALLOW,
                     action=[
                         PolicyAction.GET_OBJECT,

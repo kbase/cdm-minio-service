@@ -42,9 +42,6 @@ class PolicyAction(str, Enum):
 class PolicyStatement(BaseModel):
     """Individual policy statement."""
 
-    sid: Annotated[
-        Optional[str], Field(default=None, description="Statement identifier")
-    ]
     effect: Annotated[PolicyEffect, Field(description="Allow or Deny")]
     action: Annotated[
         Union[PolicyAction, List[PolicyAction], str, List[str]],
@@ -74,7 +71,6 @@ class PolicyDocument(BaseModel):
             "Version": self.version,
             "Statement": [
                 {
-                    "Sid": stmt.sid,
                     "Effect": stmt.effect.value,
                     "Action": stmt.action,
                     "Resource": stmt.resource,
@@ -92,7 +88,6 @@ class PolicyDocument(BaseModel):
         for stmt_dict in policy_dict.get("Statement", []):
             statements.append(
                 PolicyStatement(
-                    sid=stmt_dict.get("Sid"),
                     effect=PolicyEffect(stmt_dict["Effect"]),
                     action=stmt_dict["Action"],
                     resource=stmt_dict["Resource"],
