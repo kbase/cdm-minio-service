@@ -54,6 +54,12 @@ class PolicyValidationError(MinIOManagerError):
     pass
 
 
+class PolicyOperationError(MinIOManagerError):
+    """Raised when MinIO policy operations fail."""
+
+    pass
+
+
 class BucketValidationError(MinIOManagerError):
     """Raised when bucket name or configuration validation fails."""
 

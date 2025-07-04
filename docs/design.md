@@ -15,12 +15,17 @@ The **MinIO Manager Service** is a centralized FastAPI-based component that prog
   - Create/rotate MinIO user with a unique access/secret key pair.
   - Assign a per-user `home` path (Create if it doesn't exist):  
     ```
-    s3a://cdm-lake/warehouse/{user_name}/
+    s3a://cdm-lake/users-general-warehouse/{user_name}/  # for general data files (e.g. csv, tsv, etc.)
+    s3a://cdm-lake/users-sql-warehouse/{user_name}/      # for Spark SQL warehouse
     ```
   - Automatically generate and attach a policy granting `GetObject`, `PutObject`, `ListBucket`, `DeleteObject`, etc. on that path.
 
 - **Group Management**
   - Create named groups (e.g. `KBase`, `BER`, `CDM_Science`).
+  - Create a `home` path for each group (Create if it doesn't exist):  
+    ```
+    s3a://cdm-lake/groups-general-warehouse/{group_name}/  # for general data files (e.g. csv, tsv, etc.)
+    ```
   - Assign users to groups; inherit group policies in addition to personal policies.
   - Manage cross-user sharing: add/remove group-level permissions on shared prefixes.
 
@@ -60,7 +65,7 @@ flowchart TD
     MinIOOps -->|Create/Rotate User & Policy| MinIO
     API -->|Return Access/Secret Keys| JupyterHub
     JupyterHub -->|Set in Spark Config| SparkApp
-    SparkApp -->|s3a://cdm-lake/warehouse/user_name/| MinIO
+    SparkApp -->|s3a://cdm-lake/users-sql-warehouse/user_name/| MinIO
 ```
 
 ## 5. Primary API Endpoints (Example-WIP)
@@ -95,7 +100,7 @@ flowchart TD
      ```python
      spark.conf.set("spark.hadoop.fs.s3a.access.key", ACCESS_KEY)
      spark.conf.set("spark.hadoop.fs.s3a.secret.key", SECRET_KEY)
-     spark.conf.set("spark.sql.warehouse.dir", f"s3a://cdm-lake/warehouse/{USER}/")
+     spark.conf.set("spark.sql.warehouse.dir", f"s3a://cdm-lake/users-sql-warehouse/{USER}/")
      ```
    - Spark jobs now transparently respect MinIO policies.
 
