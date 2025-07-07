@@ -330,10 +330,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             )
 
         # Extract bucket and path from S3 URL
-        if path.startswith("s3a://"):
-            path_without_scheme = path.replace("s3a://", "")
-        else:  # s3://
-            path_without_scheme = path.replace("s3://", "")
+        path_without_scheme = re.sub(r'^s3a?://', '', s)
         path_parts = path_without_scheme.split("/", 1)
 
         if not path_parts:
