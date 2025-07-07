@@ -25,11 +25,6 @@ class PolicyAction(str, Enum):
 
     # Bucket actions
     LIST_BUCKET = "s3:ListBucket"
-    LIST_BUCKET_MULTIPART_UPLOADS = "s3:ListBucketMultipartUploads"
-
-    # Multipart actions
-    ABORT_MULTIPART_UPLOAD = "s3:AbortMultipartUpload"
-    LIST_MULTIPART_UPLOAD_PARTS = "s3:ListMultipartUploadParts"
 
     # Administrative actions
     GET_BUCKET_LOCATION = "s3:GetBucketLocation"
