@@ -199,6 +199,8 @@ class PolicyManager(ResourceManager[PolicyModel]):
             ]
         elif target_type == TargetType.GROUP:
             return [f"{self.config.groups_general_warehouse_prefix}/{target_name}"]
+        else:
+            raise PolicyOperationError(f"Invalid target type: {target_type}")
 
     def _create_policy_statements(
         self, resource_paths: list[str]
