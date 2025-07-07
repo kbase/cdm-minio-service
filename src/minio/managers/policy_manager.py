@@ -1,3 +1,4 @@
+import json
 import logging
 import re
 import tempfile
@@ -145,6 +146,23 @@ class PolicyManager(ResourceManager[PolicyModel]):
             logger.info(f"Created {target_type.value} policy: {policy_name}")
             return policy_model
 
+    async def get_policy(
+        self, target_type: TargetType, target_name: str
+    ) -> PolicyModel:
+        """
+        Retrieve the existing policy for a user or group from MinIO.
+
+        This method loads the complete policy document including all statements,
+        permissions, and conditions from the MinIO server.
+
+        Args:
+            target_type: The type of target (USER or GROUP) to get the policy for
+            target_name: The username or group name to retrieve the policy for
+        """
+        async with self.operation_context("get_policy"):
+            policy_name = self.get_policy_name(target_type, target_name)
+            return await self._load_minio_policy(policy_name)
+
     # === CONVENIENCE METHODS FOR USER/GROUP POLICIES ===
 
     async def create_user_policy(self, username: str) -> PolicyModel:
@@ -154,6 +172,14 @@ class PolicyManager(ResourceManager[PolicyModel]):
     async def create_group_policy(self, group_name: str) -> PolicyModel:
         """Create a default policy for a group."""
         return await self.create_policy(TargetType.GROUP, group_name)
+
+    async def get_user_policy(self, username: str) -> PolicyModel:
+        """Retrieve the existing policy for a specific user."""
+        return await self.get_policy(TargetType.USER, username)
+
+    async def get_group_policy(self, group_name: str) -> PolicyModel:
+        """Retrieve the existing policy for a specific group."""
+        return await self.get_policy(TargetType.GROUP, group_name)
 
     # === LISTING AND UTILITY METHODS ===
 
@@ -297,3 +323,53 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 Path(temp_file_path).unlink()
             except Exception as e:
                 logger.warning(f"Failed to cleanup temporary policy file: {e}")
+
+    async def _load_minio_policy(self, policy_name: str) -> PolicyModel:
+        """Load a policy from MinIO using the command executor."""
+        # Get policy info from MinIO
+        cmd_args = self._command_builder.build_policy_command(
+            CommandPolicyAction.INFO, policy_name
+        )
+        result = await self._executor._execute_command(cmd_args)
+        if not result.success:
+            raise PolicyOperationError(f"Failed to get policy info: {result.stderr}")
+
+        policy_data = json.loads(result.stdout)
+
+        # Extract the actual policy from MinIO response
+        policy_json = policy_data.get("Policy", policy_data)
+
+        # Create PolicyDocument from the policy JSON
+        statements = []
+        for stmt_data in policy_json.get("Statement", []):
+            actions = []
+            for action in stmt_data.get("Action", []):
+                try:
+                    matching_action = next(
+                        policy_action
+                        for policy_action in PolicyAction
+                        if policy_action.value == action
+                    )
+                    actions.append(matching_action)
+                except StopIteration:
+                    actions.append(action)
+
+            statement = PolicyStatement(
+                effect=(
+                    PolicyEffect.ALLOW
+                    if stmt_data.get("Effect") == "Allow"
+                    else PolicyEffect.DENY
+                ),
+                action=actions,
+                resource=stmt_data.get("Resource", []),
+                condition=stmt_data.get("Condition"),
+                principal=stmt_data.get("Principal"),
+            )
+            statements.append(statement)
+
+        policy_document = PolicyDocument(statement=statements)
+
+        return PolicyModel(
+            policy_name=policy_name,
+            policy_document=policy_document,
+        )
