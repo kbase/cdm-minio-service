@@ -163,6 +163,44 @@ class PolicyManager(ResourceManager[PolicyModel]):
             policy_name = self.get_policy_name(target_type, target_name)
             return await self._load_minio_policy(policy_name)
 
+    async def update_policy(self, policy_model: PolicyModel) -> PolicyModel:
+        """
+        Update an existing policy in MinIO with new permissions or statements.
+
+        This method handles the complex process of updating policies by:
+        1. Detaching the policy from its current targets
+        2. Deleting the old policy
+        3. Creating the updated policy
+        4. Re-attaching the policy to its targets
+
+        Args:
+            policy_model: The updated policy model to save to MinIO
+        """
+        async with self.operation_context("update_policy"):
+            await self._update_minio_policy(policy_model)
+            logger.info(f"Updated policy: {policy_model.policy_name}")
+            return policy_model
+
+    async def delete_policy(self, target_type: TargetType, target_name: str) -> None:
+        """
+        Delete a user's or group's policy from MinIO.
+
+        This method permanently removes the policy from MinIO. The policy will be
+        automatically detached from any users or groups before deletion.
+
+        Args:
+            target_type: The type of target (USER or GROUP) to delete the policy for
+            target_name: The username or group name whose policy should be deleted
+        """
+        async with self.operation_context("delete_policy"):
+            policy_name = self.get_policy_name(target_type, target_name)
+
+            success = await self.delete_resource(policy_name)
+            if not success:
+                raise PolicyOperationError(f"Failed to delete policy: {policy_name}")
+
+            logger.info(f"Deleted {target_type.value} policy: {policy_name}")
+
     # === CONVENIENCE METHODS FOR USER/GROUP POLICIES ===
 
     async def create_user_policy(self, username: str) -> PolicyModel:
@@ -399,6 +437,45 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 Path(temp_file_path).unlink()
             except Exception as e:
                 logger.warning(f"Failed to cleanup temporary policy file: {e}")
+
+    async def _update_minio_policy(self, policy_model: PolicyModel) -> None:
+        """Update a policy in MinIO by handling attachments properly."""
+        policy_name = policy_model.policy_name
+
+        # For user policies, detach from the specific user first
+        if policy_name.startswith(f"{TargetType.USER.value}-policy-"):
+            username = policy_name.replace(f"{TargetType.USER.value}-policy-", "")
+            logger.info(
+                f"Detected user policy {policy_name} for user {username}, detaching first"
+            )
+            await self.detach_policy_from_user(policy_name, username)
+            logger.info(f"Successfully detached {policy_name} from user {username}")
+
+        # For group policies, detach from the specific group first
+        elif policy_name.startswith(f"{TargetType.GROUP.value}-policy-"):
+            group_name = policy_name.replace(f"{TargetType.GROUP.value}-policy-", "")
+            logger.info(
+                f"Detected group policy {policy_name} for group {group_name}, detaching first"
+            )
+            await self.detach_policy_from_group(policy_name, group_name)
+            logger.info(f"Successfully detached {policy_name} from group {group_name}")
+
+        # Now delete and recreate the policy
+        logger.info(f"Deleting policy {policy_name}")
+        await self.delete_resource(policy_name)
+        logger.info(f"Creating updated policy {policy_name}")
+        await self._create_minio_policy(policy_model)
+
+        # Reattach to the specific user/group
+        if policy_name.startswith(f"{TargetType.USER.value}-policy-"):
+            username = policy_name.replace(f"{TargetType.USER.value}-policy-", "")
+            await self.attach_policy_to_user(policy_name, username)
+            logger.info(f"Reattached {policy_name} to user {username}")
+
+        elif policy_name.startswith(f"{TargetType.GROUP.value}-policy-"):
+            group_name = policy_name.replace(f"{TargetType.GROUP.value}-policy-", "")
+            await self.attach_policy_to_group(policy_name, group_name)
+            logger.info(f"Reattached {policy_name} to group {group_name}")
 
     async def _load_minio_policy(self, policy_name: str) -> PolicyModel:
         """Load a policy from MinIO using the command executor."""
