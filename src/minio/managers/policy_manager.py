@@ -414,6 +414,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             condition=None,
             principal=None,
         )
+        # TODO: check if the statement already exists and deduplicate if so
         policy_model.policy_document.statement.append(new_statement)
 
     # === LISTING AND UTILITY METHODS ===
