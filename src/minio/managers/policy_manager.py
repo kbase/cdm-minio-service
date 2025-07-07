@@ -181,6 +181,82 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Retrieve the existing policy for a specific group."""
         return await self.get_policy(TargetType.GROUP, group_name)
 
+    # === POLICY ATTACHMENT OPERATIONS ===
+    async def attach_policy_to_user(self, policy_name: str, username: str) -> None:
+        """
+        Attach an existing policy to a user, granting them the policy's permissions.
+
+        Args:
+            policy_name: The name of the policy to attach
+            username: The username to attach the policy to
+        """
+        await self._attach_detach_policy(
+            policy_name, TargetType.USER, username, attach=True
+        )
+
+    async def detach_policy_from_user(self, policy_name: str, username: str) -> None:
+        """
+        Detach a policy from a user, removing the policy's permissions from the user.
+
+        Args:
+            policy_name: The name of the policy to detach
+            username: The username to detach the policy from
+        """
+        await self._attach_detach_policy(
+            policy_name, TargetType.USER, username, attach=False
+        )
+
+    async def attach_policy_to_group(self, policy_name: str, group_name: str) -> None:
+        """
+        Attach an existing policy to a group, granting all group members the policy's permissions.
+
+        Args:
+            policy_name: The name of the policy to attach
+            group_name: The group name to attach the policy to
+        """
+        await self._attach_detach_policy(
+            policy_name, TargetType.GROUP, group_name, attach=True
+        )
+
+    async def detach_policy_from_group(self, policy_name: str, group_name: str) -> None:
+        """
+        Detach a policy from a group, removing the policy's permissions from all group members.
+
+        Args:
+            policy_name: The name of the policy to detach
+            group_name: The group name to detach the policy from
+        """
+        await self._attach_detach_policy(
+            policy_name, TargetType.GROUP, group_name, attach=False
+        )
+
+    async def _attach_detach_policy(
+        self, policy_name: str, target_type: TargetType, target_name: str, attach: bool
+    ) -> None:
+        """Generic method to attach or detach a policy to/from a user or group."""
+        operation = "attach" if attach else "detach"
+        operation_context = f"{operation}_policy_to_{target_type.value}"
+
+        async with self.operation_context(operation_context):
+            if attach:
+                cmd_args = self._command_builder.build_policy_attach_command(
+                    policy_name, target_type.value, target_name
+                )
+            else:
+                cmd_args = self._command_builder.build_policy_detach_command(
+                    policy_name, target_type.value, target_name
+                )
+
+            result = await self._executor._execute_command(cmd_args)
+
+            if not result.success:
+                raise PolicyOperationError(
+                    f"Failed to {operation} policy {policy_name} {'to' if attach else 'from'} {target_type.value} {target_name}: {result.stderr}"
+                )
+            logger.info(
+                f"{'Attached' if attach else 'Detached'} policy {policy_name} {'to' if attach else 'from'} {target_type.value} {target_name}"
+            )
+
     # === LISTING AND UTILITY METHODS ===
 
     def get_policy_name(self, target_type: TargetType, target_name: str) -> str:

@@ -81,3 +81,55 @@ class MinIOCommandBuilder:
             cmd.append(file_path)
 
         return cmd
+
+    def build_policy_attach_command(
+        self,
+        policy_name: str,
+        target_type: str,
+        target_name: str,
+    ) -> List[str]:
+        """Build policy attach command.
+
+        Args:
+            policy_name: Policy name
+            target_type: Target type (user or group)
+            target_name: Target name
+
+        Returns:
+            Command arguments list
+        """
+        return [
+            "admin",
+            AdminCommand.POLICY.value,
+            PolicyAction.ATTACH.value,
+            self.alias,
+            policy_name,
+            f"--{target_type}",
+            target_name,
+        ]
+
+    def build_policy_detach_command(
+        self,
+        policy_name: str,
+        target_type: str,
+        target_name: str,
+    ) -> List[str]:
+        """Build policy detach command.
+
+        Args:
+            policy_name: Policy name
+            target_type: Target type (user or group)
+            target_name: Target name
+
+        Returns:
+            Command arguments list
+        """
+        return [
+            "admin",
+            AdminCommand.POLICY.value,
+            PolicyAction.DETACH.value,
+            self.alias,
+            policy_name,
+            f"--{target_type}",
+            target_name,
+        ]
