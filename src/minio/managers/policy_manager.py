@@ -34,6 +34,19 @@ RESERVED_POLICIES = {
 }
 RESOURCE_TYPE = "policy"
 
+# Permission level to action mappings
+PERMISSION_LEVEL_ACTIONS = {
+    PolicyPermissionLevel.READ: [
+        PolicyAction.GET_OBJECT,
+    ],
+    PolicyPermissionLevel.WRITE: [
+        PolicyAction.GET_OBJECT,
+        PolicyAction.PUT_OBJECT,
+        PolicyAction.DELETE_OBJECT,
+    ],
+    PolicyPermissionLevel.ADMIN: [PolicyAction.ALL_ACTIONS],
+}
+
 
 class TargetType(str, Enum):
     """Target types for policy operations."""
@@ -330,7 +343,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             )
 
         # Extract bucket and path from S3 URL
-        path_without_scheme = re.sub(r'^s3a?://', '', s)
+        path_without_scheme = re.sub(r"^s3a?://", "", path)
         path_parts = path_without_scheme.split("/", 1)
 
         if not path_parts:
@@ -359,10 +372,10 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Add path prefixes to existing ListBucket statement."""
         list_bucket_stmt = self._find_list_bucket_statement(policy_model)
 
-        if not list_bucket_stmt or not list_bucket_stmt.condition:
+        if not list_bucket_stmt:
             return
 
-        existing_prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
+        existing_prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]  # type: ignore
         new_prefixes = [f"{clean_path}/*", f"{clean_path}"]
 
         for prefix in new_prefixes:
@@ -390,7 +403,9 @@ class PolicyManager(ResourceManager[PolicyModel]):
         permission_level: PolicyPermissionLevel,
     ) -> None:
         """Add object-level permissions statement for the path."""
-        actions = self._get_actions_for_permission_level(permission_level)
+        actions = PERMISSION_LEVEL_ACTIONS.get(
+            permission_level, [PolicyAction.GET_OBJECT]
+        )
 
         new_statement = PolicyStatement(
             effect=PolicyEffect.ALLOW,
@@ -515,23 +530,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
             condition=None,
             principal=None,
         )
-
-    def _get_actions_for_permission_level(
-        self, level: PolicyPermissionLevel
-    ) -> List[PolicyAction]:
-        """Get actions for a permission level."""
-        permission_mapping = {
-            PolicyPermissionLevel.READ: [
-                PolicyAction.GET_OBJECT,
-            ],
-            PolicyPermissionLevel.WRITE: [
-                PolicyAction.GET_OBJECT,
-                PolicyAction.PUT_OBJECT,
-                PolicyAction.DELETE_OBJECT,
-            ],
-            PolicyPermissionLevel.ADMIN: [PolicyAction.ALL_ACTIONS],
-        }
-        return permission_mapping.get(level, [PolicyAction.GET_OBJECT])
 
     async def _create_minio_policy(self, policy_model: PolicyModel) -> None:
         """Create policy in MinIO with retry logic."""
