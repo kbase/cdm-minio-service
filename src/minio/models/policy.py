@@ -34,6 +34,14 @@ class PolicyAction(str, Enum):
     ALL_ACTIONS = "s3:*"
 
 
+class PolicyPermissionLevel(str, Enum):
+    """Simplified permission levels."""
+
+    READ = "read"
+    WRITE = "write"
+    ADMIN = "admin"
+
+
 class PolicyStatement(BaseModel):
     """Individual policy statement."""
 

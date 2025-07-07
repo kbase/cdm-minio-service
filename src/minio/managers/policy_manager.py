@@ -16,6 +16,7 @@ from ..models.policy import (
     PolicyDocument,
     PolicyEffect,
     PolicyModel,
+    PolicyPermissionLevel,
     PolicyStatement,
 )
 from .resource_manager import ResourceManager
@@ -295,6 +296,114 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 f"{'Attached' if attach else 'Detached'} policy {policy_name} {'to' if attach else 'from'} {target_type.value} {target_name}"
             )
 
+    # === POLICY DOCUMENT MANIPULATION ===
+
+    def add_path_access_to_policy(
+        self,
+        policy_model: PolicyModel,
+        path: str,
+        permission_level: PolicyPermissionLevel,
+    ) -> None:
+        """
+        Add access permissions for a specific path to an existing policy model.
+
+        Args:
+            policy_model: The policy model to modify (modified in-place)
+            path: The S3 path to grant access to (e.g., "s3a://bucket/path/to/data")
+            permission_level: The level of access to grant (READ, WRITE, or ADMIN)
+
+        Note:
+            This method only modifies the policy model in memory. Call update_policy()
+            to persist the changes to MinIO.
+        """
+        clean_path = self._normalize_path(path)
+
+        self._add_path_to_list_bucket_statement(policy_model, clean_path)
+        self._add_object_level_statement(policy_model, clean_path, permission_level)
+
+    def _normalize_path(self, path: str) -> str:
+        """Convert S3 path to bucket-relative path."""
+
+        if not path.startswith(("s3://", "s3a://")):
+            raise PolicyOperationError(
+                f"Invalid S3 path format: {path}. Must start with s3:// or s3a://"
+            )
+
+        # Extract bucket and path from S3 URL
+        if path.startswith("s3a://"):
+            path_without_scheme = path.replace("s3a://", "")
+        else:  # s3://
+            path_without_scheme = path.replace("s3://", "")
+        path_parts = path_without_scheme.split("/", 1)
+
+        if not path_parts:
+            raise PolicyOperationError(f"Invalid S3 path format: {path}")
+
+        bucket_in_path = path_parts[0]
+
+        # Validate bucket matches our configuration
+        # TODO: support multiple buckets in the future
+        if bucket_in_path != self.config.default_bucket:
+            raise PolicyOperationError(
+                f"Path bucket '{bucket_in_path}' does not match configured bucket '{self.config.default_bucket}'"
+            )
+
+        # Return the path part (everything after bucket)
+        if len(path_parts) <= 1:
+            raise PolicyOperationError(
+                f"S3 path must include a path component after bucket: {path}"
+            )
+
+        return path_parts[1]
+
+    def _add_path_to_list_bucket_statement(
+        self, policy_model: PolicyModel, clean_path: str
+    ) -> None:
+        """Add path prefixes to existing ListBucket statement."""
+        list_bucket_stmt = self._find_list_bucket_statement(policy_model)
+
+        if not list_bucket_stmt or not list_bucket_stmt.condition:
+            return
+
+        existing_prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
+        new_prefixes = [f"{clean_path}/*", f"{clean_path}"]
+
+        for prefix in new_prefixes:
+            if prefix not in existing_prefixes:
+                existing_prefixes.append(prefix)
+
+    def _find_list_bucket_statement(
+        self, policy_model: PolicyModel
+    ) -> PolicyStatement | None:
+        """Find the ListBucket statement with prefix conditions."""
+        for stmt in policy_model.policy_document.statement:
+            if (
+                PolicyAction.LIST_BUCKET in stmt.action
+                and stmt.condition
+                and "StringLike" in stmt.condition
+                and "s3:prefix" in stmt.condition["StringLike"]
+            ):
+                return stmt
+        return None
+
+    def _add_object_level_statement(
+        self,
+        policy_model: PolicyModel,
+        clean_path: str,
+        permission_level: PolicyPermissionLevel,
+    ) -> None:
+        """Add object-level permissions statement for the path."""
+        actions = self._get_actions_for_permission_level(permission_level)
+
+        new_statement = PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=actions,
+            resource=[f"arn:aws:s3:::{self.config.default_bucket}/{clean_path}/*"],
+            condition=None,
+            principal=None,
+        )
+        policy_model.policy_document.statement.append(new_statement)
+
     # === LISTING AND UTILITY METHODS ===
 
     def get_policy_name(self, target_type: TargetType, target_name: str) -> str:
@@ -409,6 +518,23 @@ class PolicyManager(ResourceManager[PolicyModel]):
             condition=None,
             principal=None,
         )
+
+    def _get_actions_for_permission_level(
+        self, level: PolicyPermissionLevel
+    ) -> List[PolicyAction]:
+        """Get actions for a permission level."""
+        permission_mapping = {
+            PolicyPermissionLevel.READ: [
+                PolicyAction.GET_OBJECT,
+            ],
+            PolicyPermissionLevel.WRITE: [
+                PolicyAction.GET_OBJECT,
+                PolicyAction.PUT_OBJECT,
+                PolicyAction.DELETE_OBJECT,
+            ],
+            PolicyPermissionLevel.ADMIN: [PolicyAction.ALL_ACTIONS],
+        }
+        return permission_mapping.get(level, [PolicyAction.GET_OBJECT])
 
     async def _create_minio_policy(self, policy_model: PolicyModel) -> None:
         """Create policy in MinIO with retry logic."""
