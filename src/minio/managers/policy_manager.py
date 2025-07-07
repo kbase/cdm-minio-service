@@ -8,9 +8,15 @@ from typing import List
 from ...service.arg_checkers import not_falsy
 from ...service.exceptions import PolicyOperationError
 from ..core.minio_client import MinIOClient
-from ..models.command import PolicyAction
+from ..models.command import PolicyAction as CommandPolicyAction
 from ..models.minio_config import MinIOConfig
-from ..models.policy import PolicyDocument, PolicyEffect, PolicyModel, PolicyStatement
+from ..models.policy import (
+    PolicyAction,
+    PolicyDocument,
+    PolicyEffect,
+    PolicyModel,
+    PolicyStatement,
+)
 from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
@@ -88,15 +94,19 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     def _build_exists_command(self, name: str) -> List[str]:
         """Build command to check if policy exists."""
-        return self._command_builder.build_policy_command(PolicyAction.INFO, name)
+        return self._command_builder.build_policy_command(
+            CommandPolicyAction.INFO, name
+        )
 
     def _build_list_command(self) -> List[str]:
         """Build command to list all policies."""
-        return self._command_builder.build_policy_command(PolicyAction.LIST)
+        return self._command_builder.build_policy_command(CommandPolicyAction.LIST)
 
     def _build_delete_command(self, name: str) -> List[str]:
         """Build command to delete a policy."""
-        return self._command_builder.build_policy_command(PolicyAction.DELETE, name)
+        return self._command_builder.build_policy_command(
+            CommandPolicyAction.DELETE, name
+        )
 
     def _parse_list_output(self, stdout: str) -> List[str]:
         """Parse policy list command output."""
@@ -113,9 +123,19 @@ class PolicyManager(ResourceManager[PolicyModel]):
     async def create_policy(
         self, target_type: TargetType, target_name: str
     ) -> PolicyModel:
-        """Create a default policy for a user or group."""
+        """
+        Create a default policy for a user or group with standard permissions.
+
+        This method generates a new policy with default access permissions based on the target type.
+        For users, it grants access to both SQL and general warehouse paths. For groups, it grants
+        access to the group's shared workspace.
+
+        Args:
+            target_type: The type of target (USER or GROUP) for the policy
+            target_name: The username or group name to create the policy for
+        """
         async with self.operation_context("create_policy"):
-            policy_name = self._get_policy_name(target_type, target_name)
+            policy_name = self.get_policy_name(target_type, target_name)
 
             policy_model = self._build_default_policy(
                 target_type, target_name, policy_name
@@ -135,54 +155,119 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Create a default policy for a group."""
         return await self.create_policy(TargetType.GROUP, group_name)
 
-    # === PRIVATE HELPER METHODS ===
-    def _get_policy_name(self, target_type: TargetType, target_name: str) -> str:
-        """Generate standardized policy name."""
+    # === LISTING AND UTILITY METHODS ===
+
+    def get_policy_name(self, target_type: TargetType, target_name: str) -> str:
+        """
+        Generate a standardized policy name for a user or group.
+
+        This method creates consistent policy names following the pattern:
+        - User policies: "user-policy-{username}"
+        - Group policies: "group-policy-{groupname}"
+
+        Args:
+            target_type: The type of target (USER or GROUP)
+            target_name: The username or group name
+
+        Returns:
+            str: The standardized policy name
+        """
         return f"{target_type.value}-policy-{target_name}"
+
+    # === PRIVATE HELPER METHODS ===
 
     def _build_default_policy(
         self, target_type: TargetType, target_name: str, policy_name: str
     ) -> PolicyModel:
         """Build default policy for user or group."""
-        # Build resource paths based on target type
-        resource_paths = []
-        if target_type == TargetType.USER:
-            resource_paths.extend(
-                [
-                    f"{self.config.users_sql_warehouse_prefix}/{target_name}",
-                    f"{self.config.users_general_warehouse_prefix}/{target_name}",
-                ]
-            )
-        else:  # GROUP
-            resource_paths.append(
-                f"{self.config.groups_general_warehouse_prefix}/{target_name}"
-            )
-
-        # Build resource ARNs from paths
-        resources = []
-        for path in resource_paths:
-            resources.append(f"arn:aws:s3:::{self.config.default_bucket}/{path}/*")
-
-        policy_doc = PolicyDocument(
-            statement=[
-                PolicyStatement(
-                    effect=PolicyEffect.ALLOW,
-                    action=[
-                        PolicyAction.GET_OBJECT,
-                        PolicyAction.PUT_OBJECT,
-                        PolicyAction.DELETE_OBJECT,
-                        PolicyAction.LIST_BUCKET,
-                    ],
-                    resource=resources,
-                    condition=None,
-                    principal=None,
-                )
-            ]
-        )
+        resource_paths = self._get_target_resource_paths(target_type, target_name)
+        statements = self._create_policy_statements(resource_paths)
 
         return PolicyModel(
             policy_name=policy_name,
-            policy_document=policy_doc,
+            policy_document=PolicyDocument(statement=statements),
+        )
+
+    def _get_target_resource_paths(
+        self, target_type: TargetType, target_name: str
+    ) -> list[str]:
+        """Get resource paths for a target based on its type."""
+        if target_type == TargetType.USER:
+            return [
+                f"{self.config.users_sql_warehouse_prefix}/{target_name}",
+                f"{self.config.users_general_warehouse_prefix}/{target_name}",
+            ]
+        elif target_type == TargetType.GROUP:
+            return [f"{self.config.groups_general_warehouse_prefix}/{target_name}"]
+        else:
+            raise PolicyOperationError(f"Invalid target type: {target_type}")
+
+    def _create_policy_statements(
+        self, resource_paths: list[str]
+    ) -> list[PolicyStatement]:
+        """Create all required policy statements for S3 access."""
+        return [
+            self._create_list_all_buckets_statement(),
+            self._create_bucket_location_statement(),
+            self._create_list_bucket_statement(resource_paths),
+            self._create_object_operations_statement(resource_paths),
+        ]
+
+    def _create_list_all_buckets_statement(self) -> PolicyStatement:
+        """Create statement for listing all buckets (required for MinIO users to see buckets in the UI)."""
+        return PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=[PolicyAction.LIST_ALL_MY_BUCKETS],
+            resource=["*"],
+            condition=None,
+            principal=None,
+        )
+
+    def _create_bucket_location_statement(self) -> PolicyStatement:
+        """Create statement for getting bucket location (required for MinIO users to see buckets in the UI)."""
+        return PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=[PolicyAction.GET_BUCKET_LOCATION],
+            resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
+            condition=None,
+            principal=None,
+        )
+
+    def _create_list_bucket_statement(
+        self, resource_paths: list[str]
+    ) -> PolicyStatement:
+        """Create statement for listing bucket contents with path restrictions."""
+        prefix_conditions = []
+        for path in resource_paths:
+            prefix_conditions.extend([f"{path}/*", f"{path}"])
+
+        return PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=[PolicyAction.LIST_BUCKET],
+            resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
+            condition={"StringLike": {"s3:prefix": prefix_conditions}},
+            principal=None,
+        )
+
+    def _create_object_operations_statement(
+        self, resource_paths: list[str]
+    ) -> PolicyStatement:
+        """Create statement for object-level operations (get, put, delete)."""
+        object_resources = [
+            f"arn:aws:s3:::{self.config.default_bucket}/{path}/*"
+            for path in resource_paths
+        ]
+
+        return PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=[
+                PolicyAction.GET_OBJECT,
+                PolicyAction.PUT_OBJECT,
+                PolicyAction.DELETE_OBJECT,
+            ],
+            resource=object_resources,
+            condition=None,
+            principal=None,
         )
 
     async def _create_minio_policy(self, policy_model: PolicyModel) -> None:
@@ -198,7 +283,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         try:
             # Use command building pattern
             cmd_args = self._command_builder.build_policy_command(
-                PolicyAction.CREATE, policy_model.policy_name, temp_file_path
+                CommandPolicyAction.CREATE, policy_model.policy_name, temp_file_path
             )
             result = await self._executor._execute_command(cmd_args)
 
