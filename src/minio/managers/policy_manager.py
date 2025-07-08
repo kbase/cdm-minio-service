@@ -403,9 +403,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         permission_level: PolicyPermissionLevel,
     ) -> None:
         """Add object-level permissions statement for the path."""
-        actions = PERMISSION_LEVEL_ACTIONS.get(
-            permission_level, [PolicyAction.GET_OBJECT]
-        )
+        actions = PERMISSION_LEVEL_ACTIONS[permission_level]
 
         new_statement = PolicyStatement(
             effect=PolicyEffect.ALLOW,
@@ -414,8 +412,9 @@ class PolicyManager(ResourceManager[PolicyModel]):
             condition=None,
             principal=None,
         )
-        # TODO: check if the statement already exists and deduplicate if so
-        policy_model.policy_document.statement.append(new_statement)
+        # Only add if an equivalent statement doesn't already exist
+        if new_statement not in policy_model.policy_document.statement:
+            policy_model.policy_document.statement.append(new_statement)
 
     # === LISTING AND UTILITY METHODS ===
 

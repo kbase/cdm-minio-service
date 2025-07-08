@@ -59,6 +59,69 @@ class PolicyStatement(BaseModel):
         Field(default=None, description="Principal (for resource policies)"),
     ]
 
+    def __eq__(self, other: object) -> bool:
+        """Check if two policy statements are functionally equivalent."""
+        if not isinstance(other, PolicyStatement):
+            return False
+
+        # Compare basic fields
+        if self.effect != other.effect:
+            return False
+        if self.condition != other.condition:
+            return False
+        if self.principal != other.principal:
+            return False
+
+        # Compare actions (order doesn't matter)
+        self_actions = (
+            set(self.action) if isinstance(self.action, list) else {self.action}
+        )
+        other_actions = (
+            set(other.action) if isinstance(other.action, list) else {other.action}
+        )
+        if self_actions != other_actions:
+            return False
+
+        # Compare resources (order doesn't matter)
+        self_resources = (
+            set(self.resource) if isinstance(self.resource, list) else {self.resource}
+        )
+        other_resources = (
+            set(other.resource)
+            if isinstance(other.resource, list)
+            else {other.resource}
+        )
+        if self_resources != other_resources:
+            return False
+
+        return True
+
+    def __hash__(self) -> int:
+        """Make PolicyStatement hashable for use in sets/dicts."""
+        # Convert lists to frozensets for hashability
+        actions = (
+            frozenset(self.action)
+            if isinstance(self.action, list)
+            else frozenset({self.action})
+        )
+        resources = (
+            frozenset(self.resource)
+            if isinstance(self.resource, list)
+            else frozenset({self.resource})
+        )
+
+        # Convert condition dict to string for hashability (simplified approach)
+        condition_str = str(sorted(self.condition.items())) if self.condition else None
+
+        # Convert principal to frozenset (if exists)
+        principal = (
+            frozenset(self.principal)
+            if isinstance(self.principal, list)
+            else (frozenset({self.principal}) if self.principal else None)
+        )
+
+        return hash((self.effect, actions, resources, condition_str, principal))
+
 
 class PolicyDocument(BaseModel):
     """Policy document structure."""
