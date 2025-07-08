@@ -418,15 +418,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
             policy_model, new_statement, clean_path
         )
         if conflicts:
-            # Remove conflicting statements and add the new one
-            policy_model.policy_document.statement = [
-                stmt
-                for stmt in policy_model.policy_document.statement
-                if stmt not in conflicts
-            ]
-            policy_model.policy_document.statement.append(new_statement)
+            raise PolicyOperationError(
+                f"Conflicting policy statements found for path {clean_path}"
+            )
+        
         # Only add if an equivalent statement doesn't already exist
-        elif new_statement not in policy_model.policy_document.statement:
+        if new_statement not in policy_model.policy_document.statement:
             policy_model.policy_document.statement.append(new_statement)
 
     def _detect_policy_conflicts(
