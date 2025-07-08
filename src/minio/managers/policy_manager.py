@@ -4,7 +4,7 @@ import re
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import List, Union
 
 from ...service.arg_checkers import not_falsy
 from ...service.exceptions import PolicyOperationError
@@ -412,9 +412,99 @@ class PolicyManager(ResourceManager[PolicyModel]):
             condition=None,
             principal=None,
         )
-        # Only add if an equivalent statement doesn't already exist
-        if new_statement not in policy_model.policy_document.statement:
+
+        # Check for conflicts with existing statements
+        conflicts = self._detect_policy_conflicts(
+            policy_model, new_statement, clean_path
+        )
+        if conflicts:
+            # Remove conflicting statements and add the new one
+            policy_model.policy_document.statement = [
+                stmt
+                for stmt in policy_model.policy_document.statement
+                if stmt not in conflicts
+            ]
             policy_model.policy_document.statement.append(new_statement)
+        # Only add if an equivalent statement doesn't already exist
+        elif new_statement not in policy_model.policy_document.statement:
+            policy_model.policy_document.statement.append(new_statement)
+
+    def _detect_policy_conflicts(
+        self, policy_model: PolicyModel, new_statement: PolicyStatement, clean_path: str
+    ) -> list[PolicyStatement]:
+        """Detect policy statements that conflict with a new statement for the same path."""
+        conflicts = []
+
+        for existing_stmt in policy_model.policy_document.statement:
+            # Skip if it's the same statement (equality check)
+            if existing_stmt == new_statement:
+                continue
+
+            # Check if both statements affect the same path
+            if self._statements_affect_same_path(
+                existing_stmt, new_statement, clean_path
+            ):
+                # Check for conflicts: different effects or incompatible actions
+                if (
+                    existing_stmt.effect != new_statement.effect
+                    or self._actions_conflict(
+                        existing_stmt.action, new_statement.action
+                    )
+                ):
+                    conflicts.append(existing_stmt)
+
+        return conflicts
+
+    def _statements_affect_same_path(
+        self, stmt1: PolicyStatement, stmt2: PolicyStatement, path: str
+    ) -> bool:
+        """Check if two statements affect the same path."""
+        return self._statement_matches_path(
+            stmt1, path
+        ) and self._statement_matches_path(stmt2, path)
+
+    def _statement_matches_path(self, statement: PolicyStatement, path: str) -> bool:
+        """Check if a statement matches a specific path."""
+        if statement.effect != PolicyEffect.ALLOW:
+            return False
+
+        resources = (
+            statement.resource
+            if isinstance(statement.resource, list)
+            else [statement.resource]
+        )
+
+        for resource in resources:
+            if isinstance(resource, str) and "arn:aws:s3:::" in resource:
+                # Extract path from ARN like: arn:aws:s3:::bucket/path/*
+                arn_path = resource.split("arn:aws:s3:::")[1].replace("/*", "")
+                # Remove bucket name to get just the path
+                if "/" in arn_path:
+                    bucket_and_path = arn_path.split("/", 1)
+                    if len(bucket_and_path) > 1:
+                        resource_path = bucket_and_path[1]
+                        # Check if the path matches or is under this resource path
+                        if path in resource or resource_path.startswith(path):
+                            return True
+
+        return False
+
+    def _actions_conflict(
+        self,
+        actions1: Union[PolicyAction, List[PolicyAction], str, List[str]],
+        actions2: Union[PolicyAction, List[PolicyAction], str, List[str]],
+    ) -> bool:
+        """Check if two action sets conflict (have different permissions)."""
+        # Convert to sets for comparison
+        set1 = set(actions1) if isinstance(actions1, list) else {actions1}
+        set2 = set(actions2) if isinstance(actions2, list) else {actions2}
+
+        # If one has s3:* (ALL_ACTIONS) and the other doesn't, they conflict
+        if (PolicyAction.ALL_ACTIONS in set1) != (PolicyAction.ALL_ACTIONS in set2):
+            return True
+
+        # If they have different action sets, they conflict
+        return set1 != set2
 
     # === LISTING AND UTILITY METHODS ===
 
