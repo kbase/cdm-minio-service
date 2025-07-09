@@ -1,12 +1,10 @@
 import json
 import logging
-import re
 import tempfile
 from enum import Enum
 from pathlib import Path
 from typing import List
 
-from ...service.arg_checkers import not_falsy
 from ...service.exceptions import PolicyOperationError
 from ..core.minio_client import MinIOClient
 from ..models.command import PolicyAction as CommandPolicyAction
@@ -18,6 +16,7 @@ from ..models.policy import (
     PolicyModel,
     PolicyStatement,
 )
+from ..utils.validators import validate_policy_name
 from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
@@ -63,35 +62,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     def _validate_resource_name(self, name: str) -> str:
         """Validate and normalize a policy name."""
-        name = not_falsy(name, "Policy name")
-
-        # Basic policy name validation
-        name = name.strip()
-        if len(name) < 2:
-            raise ValueError("Policy name must be at least 2 characters long")
-        if len(name) > 128:
-            raise ValueError("Policy name must be at most 128 characters long")
-
-        # Must contain only alphanumeric characters, periods, hyphens, and underscores
-        if not re.match(r"^[a-zA-Z0-9._-]+$", name):
-            raise ValueError(
-                "Policy name can only contain alphanumeric characters, "
-                "periods (.), hyphens (-), and underscores (_)"
-            )
-
-        # Cannot start with a period or hyphen
-        if name[0] in ".":
-            raise ValueError("Policy name cannot start with a period")
-
-        # Check for reserved policy names (MinIO built-in policies)
-        if name in RESERVED_POLICIES:
-            raise ValueError(f"'{name}' is a reserved policy name")
-
-        # Avoid names that could be confused with system policies
-        if name.startswith("arn:"):
-            raise ValueError("Policy name cannot start with 'arn:'")
-
-        return name
+        return validate_policy_name(name)
 
     def _build_exists_command(self, name: str) -> List[str]:
         """Build command to check if policy exists."""

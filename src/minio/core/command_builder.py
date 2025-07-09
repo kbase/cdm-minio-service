@@ -2,7 +2,8 @@
 
 from typing import List, Optional
 
-from ..models.command import AdminCommand, PolicyAction
+from ..models.command import AdminCommand, PolicyAction, UserAction
+from ..utils.validators import validate_username
 
 
 class MinIOCommandBuilder:
@@ -37,6 +38,40 @@ class MinIOCommandBuilder:
             access_key,
             secret_key,
         ]
+
+    # User Management Commands
+    def build_user_command(
+        self, action: UserAction, username: str, password: Optional[str] = None
+    ) -> List[str]:
+        """Build user management command.
+
+        Args:
+            action: User action to perform
+            username: Username
+            password: Password (for add/update actions)
+
+        Returns:
+            Command arguments list
+        """
+        validate_username(username)
+        cmd = ["admin", AdminCommand.USER.value, action.value, self.alias, username]
+        if password and action in (UserAction.ADD,):
+            cmd.append(password)
+        return cmd
+
+    def build_user_list_command(self, json_format: bool = True) -> List[str]:
+        """Build user list command.
+
+        Args:
+            json_format: Whether to use JSON format
+
+        Returns:
+            Command arguments list
+        """
+        cmd = ["admin", AdminCommand.USER.value, "list", self.alias]
+        if json_format:
+            cmd.append("--json")
+        return cmd
 
     # Policy Management Commands
     def build_policy_command(

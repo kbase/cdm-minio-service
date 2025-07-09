@@ -16,6 +16,14 @@ class AdminCommand(str, Enum):
     ALIAS = "alias"
 
 
+class UserAction(str, Enum):
+    """User management actions."""
+
+    ADD = "add"
+    REMOVE = "remove"
+    INFO = "info"
+
+
 class PolicyAction(str, Enum):
     """Policy management actions."""
 
