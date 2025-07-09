@@ -43,6 +43,14 @@ class PolicyAction(str, Enum):
     LIST_BUCKET = "s3:ListBucket"
 
 
+class GroupAction(str, Enum):
+    """Group management actions."""
+
+    ADD = "add"
+    RM = "rm"
+    INFO = "info"
+
+
 class CommandResult(BaseModel):
     """Result of a MinIO command execution."""
 

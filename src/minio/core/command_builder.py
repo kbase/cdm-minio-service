@@ -2,8 +2,8 @@
 
 from typing import List, Optional
 
-from ..models.command import AdminCommand, PolicyAction, UserAction
-from ..utils.validators import validate_username
+from ..models.command import AdminCommand, GroupAction, PolicyAction, UserAction
+from ..utils.validators import validate_group_name, validate_username
 
 
 class MinIOCommandBuilder:
@@ -184,3 +184,34 @@ class MinIOCommandBuilder:
         return self._build_policy_target_command(
             PolicyAction.DETACH, policy_name, target_type, target_name
         )
+
+    # Group Management Commands
+    def build_group_command(
+        self,
+        action: GroupAction,
+        group_name: str,
+        members: Optional[List[str]] = None,
+    ) -> List[str]:
+        """Build group management command.
+
+        Args:
+            action: Group action to perform
+            group_name: Group name
+            members: List of members (for add/rm actions)
+
+        Returns:
+            Command arguments list
+        """
+        validate_group_name(group_name)
+        cmd = ["admin", AdminCommand.GROUP.value, action.value, self.alias, group_name]
+        if members and action in (GroupAction.ADD, GroupAction.RM):
+            cmd.extend(members)
+        return cmd
+
+    def build_group_list_command(self) -> List[str]:
+        """Build group list command.
+
+        Returns:
+            Command arguments list
+        """
+        return ["admin", AdminCommand.GROUP.value, "ls", self.alias]
