@@ -21,7 +21,6 @@ class UserAction(str, Enum):
 
     ADD = "add"
     REMOVE = "remove"
-    LIST = "list"
     INFO = "info"
 
 

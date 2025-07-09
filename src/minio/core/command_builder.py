@@ -3,6 +3,7 @@
 from typing import List, Optional
 
 from ..models.command import AdminCommand, PolicyAction, UserAction
+from ..utils.validators import validate_username
 
 
 class MinIOCommandBuilder:
@@ -52,6 +53,7 @@ class MinIOCommandBuilder:
         Returns:
             Command arguments list
         """
+        validate_username(username)
         cmd = ["admin", AdminCommand.USER.value, action.value, self.alias, username]
         if password and action in (UserAction.ADD,):
             cmd.append(password)
@@ -66,7 +68,7 @@ class MinIOCommandBuilder:
         Returns:
             Command arguments list
         """
-        cmd = ["admin", AdminCommand.USER.value, UserAction.LIST.value, self.alias]
+        cmd = ["admin", AdminCommand.USER.value, "list", self.alias]
         if json_format:
             cmd.append("--json")
         return cmd
