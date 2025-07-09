@@ -3,6 +3,7 @@ import re
 from ...service.arg_checkers import not_falsy
 from ...service.exceptions import (
     BucketValidationError,
+    GroupOperationError,
     PolicyValidationError,
     UserOperationError,
     ValidationError,
@@ -73,6 +74,69 @@ def validate_username(username: str) -> str:
         raise UserOperationError(f"Username '{username}' is reserved for system use")
 
     return username
+
+
+# =============================================================================
+# GROUP VALIDATION
+# =============================================================================
+
+
+def validate_group_name(group_name: str) -> str:
+    """
+    Validate group name for data governance workflows.
+
+    Args:
+        group_name: Group name to validate
+
+    Returns:
+        str: Validated and normalized group name
+
+    Raises:
+        GroupOperationError: If group name validation fails
+    """
+    group_name = not_falsy(group_name, "Group name")
+    group_name = group_name.strip()
+
+    # Length constraints for policy and path compatibility
+    if len(group_name) < 2 or len(group_name) > 64:
+        raise GroupOperationError("Group name must be between 2 and 64 characters")
+
+    # Character constraints - more restrictive for group names
+    if not re.match(r"^[a-zA-Z0-9_-]+$", group_name):
+        raise GroupOperationError(
+            "Group name can only contain letters, numbers, hyphens, and underscores"
+        )
+
+    # Must start with letter for better readability
+    if not group_name[0].isalpha():
+        raise GroupOperationError("Group name must start with a letter")
+
+    # No consecutive special characters
+    if re.search(r"[_-]{2,}", group_name):
+        raise GroupOperationError(
+            "Group name cannot contain consecutive special characters"
+        )
+
+    # Reserved group names for data governance
+    reserved_groups = {
+        "admin",
+        "root",
+        "system",
+        "all",
+        "everyone",
+        "public",
+        "default",
+        "minio",
+        "service",
+        "backup",
+        "warehouse",
+    }
+    if group_name.lower() in reserved_groups:
+        raise GroupOperationError(
+            f"Group name '{group_name}' is reserved for system use"
+        )
+
+    return group_name
 
 
 # =============================================================================
