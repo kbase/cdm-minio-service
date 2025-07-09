@@ -243,6 +243,14 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Retrieve the existing policy for a specific group."""
         return await self.get_policy(TargetType.GROUP, group_name)
 
+    async def delete_user_policy(self, username: str) -> None:
+        """Delete a user's policy from MinIO."""
+        await self.delete_policy(TargetType.USER, username)
+
+    async def delete_group_policy(self, group_name: str) -> None:
+        """Delete a group's policy from MinIO."""
+        await self.delete_policy(TargetType.GROUP, group_name)
+
     # === POLICY ATTACHMENT OPERATIONS ===
     async def attach_policy_to_user(self, policy_name: str, username: str) -> None:
         """
@@ -463,6 +471,66 @@ class PolicyManager(ResourceManager[PolicyModel]):
                             return True
 
         return False
+
+    # === POLICY ANALYSIS METHODS ===
+
+    def get_accessible_paths_from_policy(self, policy_model: PolicyModel) -> list[str]:
+        """
+        Extract all S3 paths that are accessible through the given policy.
+
+        This method analyzes all statements in the policy and extracts the S3 paths
+        that the policy grants access to. It converts internal ARN formats back to
+        user-friendly s3a:// URLs.
+
+        Args:
+            policy_model: The policy model to analyze
+        """
+        paths: set[str] = set()
+
+        for statement in policy_model.policy_document.statement:
+            if statement.effect == PolicyEffect.ALLOW:
+                extracted_paths = self._extract_paths_from_statement(statement)
+                paths.update(extracted_paths)
+
+        return sorted(paths)
+
+    def _extract_paths_from_statement(self, statement: PolicyStatement) -> set[str]:
+        """Extract accessible paths from a policy statement."""
+        paths: set[str] = set()
+        resources = self._normalize_resources_to_list(statement.resource)
+
+        for resource in resources:
+            if path := self._extract_path_from_resource_arn(resource):
+                paths.add(path)
+
+        return paths
+
+    def _normalize_resources_to_list(self, resource: str | list[str]) -> list[str]:
+        """Normalize resource field to a list of strings."""
+        return resource if isinstance(resource, list) else [resource]
+
+    def _extract_path_from_resource_arn(self, resource: str) -> str | None:
+        """Extract s3a:// path from ARN resource string."""
+        if (
+            not isinstance(resource, str)
+            or "arn:aws:s3:::" not in resource
+            or "/*" not in resource
+        ):
+            return None
+
+        arn_content = resource.split("arn:aws:s3:::")[1]
+        if not arn_content.endswith("/*"):
+            return None
+
+        path_without_wildcard = arn_content.removesuffix("/*")
+        path_parts = path_without_wildcard.split("/")
+
+        if len(path_parts) < 2:
+            return None
+
+        bucket, *path_segments = path_parts
+        path = "/".join(path_segments)
+        return f"s3a://{bucket}/{path}/"
 
     # === LISTING AND UTILITY METHODS ===
 
