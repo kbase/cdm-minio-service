@@ -176,10 +176,19 @@ class GroupManager(ResourceManager[GroupModel]):
                 raise GroupOperationError(f"Failed to create group: {result.stderr}")
 
             # Create and attach group policy
-            policy_model = await self.policy_manager.create_group_policy(group_name)
-            await self.policy_manager.attach_policy_to_group(
-                policy_model.policy_name, group_name
-            )
+            try:
+                policy_model = await self.policy_manager.create_group_policy(group_name)
+                await self.policy_manager.attach_policy_to_group(
+                    policy_model.policy_name, group_name
+                )
+            except Exception as e:
+                # Clean up policy if attachment fails
+                try:
+                    await self.policy_manager.delete_group_policy(group_name)
+                    await self.delete_resource(group_name)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to clean up policy after attachment failure: {cleanup_error}")
+                raise GroupOperationError(f"Failed to attach policy to group: {e}")
 
             # Create group shared directory structure
             await self._create_group_shared_directory(group_name)
