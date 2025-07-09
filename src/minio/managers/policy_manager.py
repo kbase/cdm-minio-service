@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import re
@@ -68,6 +69,8 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     def __init__(self, client: MinIOClient, config: MinIOConfig) -> None:
         super().__init__(client, config)
+        # Semaphore to serialize policy updates and prevent race conditions
+        self._policy_update_semaphore = asyncio.Semaphore(1)
 
     # === ResourceManager Abstract Method Implementations ===
 
@@ -182,18 +185,25 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Update an existing policy in MinIO with new permissions or statements.
 
         This method handles the complex process of updating policies by:
-        1. Detaching the policy from its current targets
-        2. Deleting the old policy
-        3. Creating the updated policy
-        4. Re-attaching the policy to its targets
+        1. Acquiring a semaphore to serialize policy updates
+        2. Detaching the policy from its current targets
+        3. Deleting the old policy
+        4. Creating the updated policy
+        5. Re-attaching the policy to its targets
 
         Args:
             policy_model: The updated policy model to save to MinIO
+
+        Note:
+            This method uses application-level serialization to prevent concurrent updates.
+            Only one policy update can occur at a time across the entire application.
         """
         async with self.operation_context("update_policy"):
-            await self._update_minio_policy(policy_model)
-            logger.info(f"Updated policy: {policy_model.policy_name}")
-            return policy_model
+            # Serialize all policy updates to prevent race conditions
+            async with self._policy_update_semaphore:
+                await self._update_minio_policy(policy_model)
+                logger.info(f"Updated policy: {policy_model.policy_name}")
+                return policy_model
 
     async def delete_policy(self, target_type: TargetType, target_name: str) -> None:
         """
