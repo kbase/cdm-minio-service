@@ -139,6 +139,9 @@ class GroupManager(ResourceManager[GroupModel]):
         The creator (admin) is automatically added to the group if not already in the members list.
         All members must exist as users before the group can be created.
 
+        If the group creation fails due to existing policy from a previous attempt and auto-cleanup process
+        does not work, the admin should manually delete the policy and try again or simply use a different group name.
+
         The group will have access to:
         - Shared workspace directory: `s3a://bucket/groups-general-warehouse/{group_name}/`
         - Subdirectories: shared/, datasets/, projects/
@@ -152,27 +155,7 @@ class GroupManager(ResourceManager[GroupModel]):
 
             # Check if group already exists
             if await self.resource_exists(group_name):
-                try:
-                    policy_model = await self.policy_manager.get_group_policy(
-                        group_name
-                    )
-                    if policy_model:
-                        group_members = (
-                            []
-                        )  # await self.get_group_members(group_name) - future function
-                        group_model = GroupModel(
-                            group_name=group_name,
-                            members=group_members,
-                            policy_name=policy_model.policy_name,
-                        )
-                        logger.info(
-                            f"Group {group_name} already exists with policy {policy_model.policy_name} and members {group_members}"
-                        )
-                        return group_model
-                except Exception as e:
-                    logger.warning(
-                        f"Group {group_name} already exists but policy is missing, attempting to create group policy and attach to group"
-                    )
+                raise GroupOperationError(f"Group {group_name} already exists")
 
             # Create group with initial members (MinIO requires at least one member)
             if members is None:
@@ -187,28 +170,28 @@ class GroupManager(ResourceManager[GroupModel]):
                 if not await self.user_manager.resource_exists(member):
                     raise GroupOperationError(f"User {member} does not exist")
 
-            # Create group policy
-            try:
-                policy_model = await self.policy_manager.get_group_policy(group_name)
-            except Exception as e:
-                logger.warning(f"Failed to get group policy - creating new policy")
-                policy_model = await self.policy_manager.create_group_policy(group_name)
-
             # Create the group
-            if not await self.resource_exists(group_name):
-                cmd_args = self._command_builder.build_group_command(
-                    GroupAction.ADD, group_name, members
-                )
-                result = await self._executor._execute_command(cmd_args)
-                if not result.success:
-                    raise GroupOperationError(
-                        f"Failed to create group: {result.stderr}"
-                    )
-
-            # Attach group policy
-            await self.policy_manager.attach_policy_to_group(
-                policy_model.policy_name, group_name
+            cmd_args = self._command_builder.build_group_command(
+                GroupAction.ADD, group_name, members
             )
+            result = await self._executor._execute_command(cmd_args)
+            if not result.success:
+                raise GroupOperationError(f"Failed to create group: {result.stderr}")
+
+            # Create and attach group policy
+            try:
+                policy_model = await self.policy_manager.create_group_policy(group_name)
+                await self.policy_manager.attach_policy_to_group(
+                    policy_model.policy_name, group_name
+                )
+            except Exception as e:
+                # Clean up policy if attachment fails
+                try:
+                    await self.policy_manager.delete_group_policy(group_name)
+                    await self.delete_resource(group_name)
+                except Exception as cleanup_error:
+                    logger.warning(f"Failed to clean up policy after attachment failure: {cleanup_error}")
+                raise GroupOperationError(f"Failed to attach policy to group: {e}")
 
             # Create group shared directory structure
             await self._create_group_shared_directory(group_name)
