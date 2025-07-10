@@ -139,6 +139,9 @@ class GroupManager(ResourceManager[GroupModel]):
         The creator (admin) is automatically added to the group if not already in the members list.
         All members must exist as users before the group can be created.
 
+        If the group creation fails due to existing policy from a previous attempt and auto-cleanup process
+        does not work, the admin should manually delete the policy and try again or simply use a different group name.
+
         The group will have access to:
         - Shared workspace directory: `s3a://bucket/groups-general-warehouse/{group_name}/`
         - Subdirectories: shared/, datasets/, projects/
