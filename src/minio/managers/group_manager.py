@@ -157,7 +157,9 @@ class GroupManager(ResourceManager[GroupModel]):
                         group_name
                     )
                     if policy_model:
-                        group_members = [] # await self.get_group_members(group_name) - future function
+                        group_members = (
+                            []
+                        )  # await self.get_group_members(group_name) - future function
                         group_model = GroupModel(
                             group_name=group_name,
                             members=group_members,
@@ -192,32 +194,21 @@ class GroupManager(ResourceManager[GroupModel]):
                 logger.warning(f"Failed to get group policy - creating new policy")
                 policy_model = await self.policy_manager.create_group_policy(group_name)
 
-            try:
-                # Create the group
-                if not await self.resource_exists(group_name):
-                    cmd_args = self._command_builder.build_group_command(
-                        GroupAction.ADD, group_name, members
-                    )
-                    result = await self._executor._execute_command(cmd_args)
-                    if not result.success:
-                        raise GroupOperationError(
-                            f"Failed to create group: {result.stderr}"
-                        )
-
-                # Attach group policy
-                await self.policy_manager.attach_policy_to_group(
-                    policy_model.policy_name, group_name
+            # Create the group
+            if not await self.resource_exists(group_name):
+                cmd_args = self._command_builder.build_group_command(
+                    GroupAction.ADD, group_name, members
                 )
-            except Exception as e:
-                # Clean up policy if attachment fails
-                try:
-                    await self.policy_manager.delete_group_policy(group_name)
-                    await self.delete_resource(group_name)
-                except Exception as cleanup_error:
-                    logger.warning(
-                        f"Failed to clean up policy after attachment failure: {cleanup_error}"
+                result = await self._executor._execute_command(cmd_args)
+                if not result.success:
+                    raise GroupOperationError(
+                        f"Failed to create group: {result.stderr}"
                     )
-                raise GroupOperationError(f"Failed to attach policy to group") from e
+
+            # Attach group policy
+            await self.policy_manager.attach_policy_to_group(
+                policy_model.policy_name, group_name
+            )
 
             # Create group shared directory structure
             await self._create_group_shared_directory(group_name)
@@ -233,7 +224,6 @@ class GroupManager(ResourceManager[GroupModel]):
                 f"Successfully created real MinIO group {group_name} with policy {policy_model.policy_name} and admin structure"
             )
             return group_model
-
 
     # Private helper methods
 
