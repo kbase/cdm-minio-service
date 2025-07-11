@@ -247,6 +247,36 @@ class PolicyManager(ResourceManager[PolicyModel]):
             policy_name, TargetType.GROUP, group_name, attach=False
         )
 
+    async def is_policy_attached_to_group(self, group_name: str) -> bool:
+        """
+        Check if the group's policy is attached to the group.
+
+        Args:
+            group_name: The name of the group to check
+
+        Returns:
+            bool: True if the group's policy is attached to the group, False otherwise
+        """
+        policy_name = self.get_policy_name(TargetType.GROUP, group_name)
+        return await self._is_policy_attached_to_target(
+            policy_name, TargetType.GROUP, group_name
+        )
+
+    async def is_policy_attached_to_user(self, username: str) -> bool:
+        """
+        Check if the user's policy is attached to the user.
+
+        Args:
+            username: The name of the user to check
+
+        Returns:
+            bool: True if the user's policy is attached to the user, False otherwise
+        """
+        policy_name = self.get_policy_name(TargetType.USER, username)
+        return await self._is_policy_attached_to_target(
+            policy_name, TargetType.USER, username
+        )
+
     async def _attach_detach_policy(
         self, policy_name: str, target_type: TargetType, target_name: str, attach: bool
     ) -> None:
@@ -273,6 +303,53 @@ class PolicyManager(ResourceManager[PolicyModel]):
             logger.info(
                 f"{'Attached' if attach else 'Detached'} policy {policy_name} {'to' if attach else 'from'} {target_type.value} {target_name}"
             )
+
+    async def _is_policy_attached_to_target(
+        self, policy_name: str, target_type: TargetType, target_name: str
+    ) -> bool:
+        """Check if a specific policy is attached to a target (user or group)."""
+        entities = await self._get_policy_attached_entities(policy_name)
+        return target_name in entities[target_type]
+
+    async def _get_policy_attached_entities(
+        self, policy_name: str
+    ) -> dict[TargetType, list[str]]:
+        """Get all entities (users and groups) that have a specific policy attached."""
+        cmd_args = self._command_builder.build_policy_entities_command(policy_name)
+        result = await self._executor._execute_command(cmd_args)
+
+        if not result.success:
+            raise PolicyOperationError(
+                f"Failed to get entities for policy {policy_name}: {result.stderr}"
+            )
+
+        return self._parse_policy_entities_output(result.stdout)
+
+    def _parse_policy_entities_output(self, output: str) -> dict[TargetType, list[str]]:
+        """Parse the JSON output of 'mc admin policy entities --json' command."""
+
+        entities = {TargetType.USER: [], TargetType.GROUP: []}
+
+        # Parse the JSON output
+        data = json.loads(output.strip())
+
+        # Extract policy mappings from result
+        result = data.get("result", {})
+        policy_mappings = result.get("policyMappings", [])
+
+        # Process each policy mapping
+        for mapping in policy_mappings:
+            # Extract users
+            users = mapping.get("users", [])
+            if users:
+                entities[TargetType.USER].extend(users)
+
+            # Extract groups
+            groups = mapping.get("groups", [])
+            if groups:
+                entities[TargetType.GROUP].extend(groups)
+
+        return entities
 
     # === POLICY ANALYSIS METHODS ===
 
