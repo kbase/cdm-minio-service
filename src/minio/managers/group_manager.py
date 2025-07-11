@@ -123,30 +123,19 @@ class GroupManager(ResourceManager[GroupModel]):
         self,
         group_name: str,
         creator: str,
-        members: List[str] | None = None,
     ) -> GroupModel:
         """
-        Create a new MinIO group with complete setup including members, policies, and shared workspace.
+        Create a new MinIO group with complete setup including policy and shared workspace.
 
         This method performs a comprehensive, idempotent group creation workflow:
-        1. Checks if group already exists with proper policy attachment (returns existing if complete)
-        2. Validates the group name format
-        3. Verifies that all intended members exist as users
-        4. Creates or retrieves the group policy
-        5. Creates the group in MinIO with initial membership (or adds missing members)
-        6. Attaches the group policy (only if not already attached)
-        7. Sets up the group's shared directory structure
-        8. Creates a welcome file with workspace instructions
+        1. Verifies that the creator exists as a user
+        2. Creates or retrieves the group policy
+        3. Creates the group in MinIO with the creator as the initial member
+        4. Attaches the group policy (only if not already attached)
+        6. Sets up the group's shared directory structure
+        7. Creates a welcome file with workspace instructions
 
-        The method is fully idempotent - it can be called multiple times safely and will:
-        - Return existing group if already properly configured
-        - Complete partial setups from previous failed attempts
-        - Add missing members to existing groups
-        - Skip policy attachment if already attached
-        - Implement proper rollback on failures
-
-        The creator (admin) is automatically added to the group if not already in the members list.
-        All members must exist as users before the group can be created.
+        The creator is automatically added as the initial group member. Additional members can be added later using add_user_to_group().
 
         The group will have access to:
         - Shared workspace directory: `s3a://bucket/groups-general-warehouse/{group_name}/`
@@ -154,57 +143,16 @@ class GroupManager(ResourceManager[GroupModel]):
 
         Args:
             group_name: The name for the new group (must be valid per MinIO requirements)
-            creator: Username of the user creating the group (automatically becomes a member)
-            members: Optional list of usernames to add to the group (creator included automatically)
+            creator: Username of the user creating the group (becomes initial member)
         """
         async with self.operation_context("create_group"):
 
-            # Check if group already exists
-            if await self.resource_exists(group_name):
-                try:
-                    policy_model = await self.policy_manager.get_group_policy(
-                        group_name
-                    )
-                    if policy_model:
-                        # Check if policy is actually attached to the group
-                        if await self.policy_manager.is_policy_attached_to_group(
-                            group_name
-                        ):
-                            group_members = [] # await self.get_group_members(group_name) - future function
-                            group_model = GroupModel(
-                                group_name=group_name,
-                                members=group_members,
-                                policy_name=policy_model.policy_name,
-                            )
-                            logger.info(
-                                f"Group {group_name} already exists with policy {policy_model.policy_name} and members {group_members}"
-                            )
-                            return group_model
-                        else:
-                            logger.warning(
-                                f"Group {group_name} exists but policy {policy_model.policy_name} is not attached, continuing with setup"
-                            )
-                except Exception as e:
-                    logger.warning(
-                        f"Group {group_name} already exists but policy is missing or not attached, attempting to create group policy and attach to group"
-                    )
-
             # Create group with initial members (MinIO requires at least one member)
-            if members is None:
-                members = []
+            members = [creator]
 
-            # Ensure creator is included in members
-            if creator not in members:
-                members.append(creator)
-
-            # Verify all members exist before creating group
-            for member in members:
-                if not await self.user_manager.resource_exists(member):
-                    raise GroupOperationError(f"User {member} does not exist")
-
-            # Track what we create for potential rollback
-            created_policy = False
-            created_group = False
+            # Verify creator exists before creating group
+            if not await self.user_manager.resource_exists(creator):
+                raise GroupOperationError(f"User {creator} does not exist")
 
             # Create group policy
             try:
@@ -212,51 +160,23 @@ class GroupManager(ResourceManager[GroupModel]):
             except Exception as e:
                 logger.warning(f"Failed to get group policy - creating new policy")
                 policy_model = await self.policy_manager.create_group_policy(group_name)
-                created_policy = True
 
-            try:
-                # Create the group or add missing members
-                if not await self.resource_exists(group_name):
-                    cmd_args = self._command_builder.build_group_command(
-                        GroupAction.ADD, group_name, members
+            # Create the group
+            if not await self.resource_exists(group_name):
+                cmd_args = self._command_builder.build_group_command(
+                    GroupAction.ADD, group_name, members
+                )
+                result = await self._executor._execute_command(cmd_args)
+                if not result.success:
+                    raise GroupOperationError(
+                        f"Failed to create group: {result.stderr}"
                     )
-                    result = await self._executor._execute_command(cmd_args)
-                    if not result.success:
-                        raise GroupOperationError(
-                            f"Failed to create group: {result.stderr}"
-                        )
-                    created_group = True
-                else:
-                    # Group exists, add any missing members
-                    existing_members = [] # await self.get_group_members(group_name) - future function
-                    missing_members = [m for m in members if m not in existing_members]
-                    if missing_members:
-                        cmd_args = self._command_builder.build_group_command(
-                            GroupAction.ADD, group_name, missing_members
-                        )
-                        result = await self._executor._execute_command(cmd_args)
-                        if not result.success:
-                            logger.warning(
-                                f"Failed to add missing members to existing group: {result.stderr}"
-                            )
 
-                # Attach group policy only if not already attached
-                if not await self.policy_manager.is_policy_attached_to_group(
-                    group_name
-                ):
-                    await self.policy_manager.attach_policy_to_group(
-                        policy_model.policy_name, group_name
-                    )
-            except Exception as e:
-                # Clean up only what we created in this call
-                try:
-                    if created_policy:
-                        await self.policy_manager.delete_group_policy(group_name)
-                    if created_group:
-                        await self.delete_resource(group_name)
-                except Exception as cleanup_error:
-                    logger.warning(f"Failed to clean up after failure: {cleanup_error}")
-                raise GroupOperationError(f"Failed to attach policy to group") from e
+            # Attach group policy only if not already attached
+            if not await self.policy_manager.is_policy_attached_to_group(group_name):
+                await self.policy_manager.attach_policy_to_group(
+                    policy_model.policy_name, group_name
+                )
 
             # Create group shared directory structure
             await self._create_group_shared_directory(group_name)
