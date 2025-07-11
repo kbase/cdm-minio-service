@@ -326,31 +326,28 @@ class PolicyManager(ResourceManager[PolicyModel]):
         return self._parse_policy_entities_output(result.stdout)
 
     def _parse_policy_entities_output(self, output: str) -> dict[TargetType, list[str]]:
-        """Parse the output of 'mc admin policy entities' command."""
+        """Parse the JSON output of 'mc admin policy entities --json' command."""
+
         entities = {TargetType.USER: [], TargetType.GROUP: []}
-        lines = output.split("\n")
-        current_section = None
 
-        for line in lines:
-            stripped_line = line.strip()
+        # Parse the JSON output
+        data = json.loads(output.strip())
 
-            # Check for section headers
-            if stripped_line == "User Mappings:":
-                current_section = TargetType.USER
-                continue
-            elif stripped_line == "Group Mappings:":
-                current_section = TargetType.GROUP
-                continue
+        # Extract policy mappings from result
+        result = data.get("result", {})
+        policy_mappings = result.get("policyMappings", [])
 
-            # If we're in a section and find a non-empty line
-            if current_section and stripped_line:
-                # Check if this is another section header (ends with : and not indented)
-                if stripped_line.endswith(":") and not line.startswith(" "):
-                    current_section = None
-                    continue
+        # Process each policy mapping
+        for mapping in policy_mappings:
+            # Extract users
+            users = mapping.get("users", [])
+            if users:
+                entities[TargetType.USER].extend(users)
 
-                # Add the entity name to the appropriate list
-                entities[current_section].append(stripped_line)
+            # Extract groups
+            groups = mapping.get("groups", [])
+            if groups:
+                entities[TargetType.GROUP].extend(groups)
 
         return entities
 

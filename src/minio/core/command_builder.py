@@ -195,7 +195,7 @@ class MinIOCommandBuilder:
             policy_name: Policy name to get entities for
 
         Returns:
-            Command arguments list for 'mc admin policy entities --policy policy_name'
+            Command arguments list for 'mc admin policy entities --policy policy_name --json'
         """
         return [
             "admin",
@@ -204,6 +204,7 @@ class MinIOCommandBuilder:
             self.alias,
             "--policy",
             policy_name,
+            "--json",
         ]
 
     # Group Management Commands
