@@ -247,6 +247,36 @@ class PolicyManager(ResourceManager[PolicyModel]):
             policy_name, TargetType.GROUP, group_name, attach=False
         )
 
+    async def is_policy_attached_to_group(self, group_name: str) -> bool:
+        """
+        Check if the group's policy is attached to the group.
+
+        Args:
+            group_name: The name of the group to check
+
+        Returns:
+            bool: True if the group's policy is attached to the group, False otherwise
+        """
+        policy_name = self.get_policy_name(TargetType.GROUP, group_name)
+        return await self._is_policy_attached_to_target(
+            policy_name, TargetType.GROUP, group_name
+        )
+
+    async def is_policy_attached_to_user(self, username: str) -> bool:
+        """
+        Check if the user's policy is attached to the user.
+
+        Args:
+            username: The name of the user to check
+
+        Returns:
+            bool: True if the user's policy is attached to the user, False otherwise
+        """
+        policy_name = self.get_policy_name(TargetType.USER, username)
+        return await self._is_policy_attached_to_target(
+            policy_name, TargetType.USER, username
+        )
+
     async def _attach_detach_policy(
         self, policy_name: str, target_type: TargetType, target_name: str, attach: bool
     ) -> None:
@@ -273,6 +303,56 @@ class PolicyManager(ResourceManager[PolicyModel]):
             logger.info(
                 f"{'Attached' if attach else 'Detached'} policy {policy_name} {'to' if attach else 'from'} {target_type.value} {target_name}"
             )
+
+    async def _is_policy_attached_to_target(
+        self, policy_name: str, target_type: TargetType, target_name: str
+    ) -> bool:
+        """Check if a specific policy is attached to a target (user or group)."""
+        entities = await self._get_policy_attached_entities(policy_name)
+        return target_name in entities[target_type]
+
+    async def _get_policy_attached_entities(
+        self, policy_name: str
+    ) -> dict[TargetType, list[str]]:
+        """Get all entities (users and groups) that have a specific policy attached."""
+        cmd_args = self._command_builder.build_policy_entities_command(policy_name)
+        result = await self._executor._execute_command(cmd_args)
+
+        if not result.success:
+            raise PolicyOperationError(
+                f"Failed to get entities for policy {policy_name}: {result.stderr}"
+            )
+
+        return self._parse_policy_entities_output(result.stdout)
+
+    def _parse_policy_entities_output(self, output: str) -> dict[TargetType, list[str]]:
+        """Parse the output of 'mc admin policy entities' command."""
+        entities = {TargetType.USER: [], TargetType.GROUP: []}
+        lines = output.split("\n")
+        current_section = None
+
+        for line in lines:
+            stripped_line = line.strip()
+
+            # Check for section headers
+            if stripped_line == "User Mappings:":
+                current_section = TargetType.USER
+                continue
+            elif stripped_line == "Group Mappings:":
+                current_section = TargetType.GROUP
+                continue
+
+            # If we're in a section and find a non-empty line
+            if current_section and stripped_line:
+                # Check if this is another section header (ends with : and not indented)
+                if stripped_line.endswith(":") and not line.startswith(" "):
+                    current_section = None
+                    continue
+
+                # Add the entity name to the appropriate list
+                entities[current_section].append(stripped_line)
+
+        return entities
 
     # === POLICY ANALYSIS METHODS ===
 

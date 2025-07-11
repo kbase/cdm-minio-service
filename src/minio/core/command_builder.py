@@ -185,6 +185,27 @@ class MinIOCommandBuilder:
             PolicyAction.DETACH, policy_name, target_type, target_name
         )
 
+    def build_policy_entities_command(
+        self,
+        policy_name: str,
+    ) -> List[str]:
+        """Build policy entities command to list all entities associated with a policy.
+
+        Args:
+            policy_name: Policy name to get entities for
+
+        Returns:
+            Command arguments list for 'mc admin policy entities --policy policy_name'
+        """
+        return [
+            "admin",
+            AdminCommand.POLICY.value,
+            PolicyAction.ENTITIES.value,
+            self.alias,
+            "--policy",
+            policy_name,
+        ]
+
     # Group Management Commands
     def build_group_command(
         self,
