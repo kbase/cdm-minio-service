@@ -305,12 +305,18 @@ class GroupManager(ResourceManager[GroupModel]):
     # Private helper methods
 
     async def _parse_group_members(self, group_info_output: str) -> List[str]:
-        """Parse group members from 'mc admin group info --json' output."""
+        """Parse group members from 'mc admin group info --json' output.
+
+        Example JSON responses:
+        - With members: {"status":"success","groupName":"global-user-group","members":["user1"],"groupStatus":"enabled","groupPolicy":"group-policy-global-user-group"}
+        - Empty group: {"status":"success","groupName":"global-user-group","groupStatus":"enabled","groupPolicy":"group-policy-global-user-group"}
+
+        Returns:
+            List of member usernames, or empty list if group has no members.
+        """
         try:
             group_info = json.loads(group_info_output)
-            # Example output:
-            # {"status":"success","groupName":"global-user-group","members":["tgu2"],"groupStatus":"enabled","groupPolicy":"group-policy-global-user-group"}
-            return group_info["members"]
+            return group_info.get("members", [])
         except Exception as e:
             raise GroupOperationError(
                 f"Failed to parse group members: {group_info_output}"
