@@ -1,3 +1,4 @@
+import json
 import logging
 from typing import List
 
@@ -85,14 +86,16 @@ class GroupManager(ResourceManager[GroupModel]):
         return self._command_builder.build_group_command(GroupAction.RM, name)
 
     def _parse_list_output(self, stdout: str) -> List[str]:
-        """Parse group list command output."""
-        # Parse group names from output
-        groups = []
-        for line in stdout.split("\n"):
-            line = line.strip()
-            if line and not line.startswith("#") and line != "Group":
-                groups.append(line)
-        return groups
+        """Parse group list command JSON output."""
+
+        groups_data = json.loads(stdout)
+        # Extract group names from JSON response - format: {"status":"success","groups":["group1","group2"]}
+        try:
+            return groups_data["groups"]
+        except Exception as e:
+            raise GroupOperationError(
+                f"Failed to parse group list command output: {stdout}"
+            ) from e
 
     # === Pre/Post Delete Cleanup Overrides ===
 
@@ -195,7 +198,123 @@ class GroupManager(ResourceManager[GroupModel]):
             )
             return group_model
 
+    async def get_group_members(self, group_name: str) -> List[str]:
+        """
+        Retrieve a list of all usernames that are members of the specified group.
+
+        Args:
+            group_name: The name of the group to get members for
+        """
+        async with self.operation_context("get_group_members"):
+            # Check if group exists
+            if not await self.resource_exists(group_name):
+                raise GroupOperationError(f"Group {group_name} not found")
+
+            # Get group info and parse members
+            cmd_args = self._command_builder.build_group_command(
+                GroupAction.INFO, group_name, json_format=True
+            )
+            result = await self._executor._execute_command(cmd_args)
+            if not result.success:
+                raise GroupOperationError(f"Failed to get group info: {result.stderr}")
+
+            members = await self._parse_group_members(result.stdout)
+            logger.info(f"Found {len(members)} members in group {group_name}")
+            return members
+
+    async def get_group_info(self, group_name: str) -> GroupModel:
+        """
+        Retrieve comprehensive information about an existing group including members and policy details.
+
+        This method gathers complete group information by:
+        1. Verifying the group exists in MinIO
+        2. Collecting all current group members
+        3. Loading the group's policy information
+        4. Building a complete GroupModel with all details
+
+        The returned model provides a complete view of the group's configuration
+        and can be used for administrative purposes and access management.
+
+        Args:
+            group_name: The name of the group to retrieve information for
+        """
+        async with self.operation_context("get_group_info"):
+            # Check if group exists
+            if not await self.resource_exists(group_name):
+                raise GroupOperationError(f"Group {group_name} not found")
+
+            # Get group members
+            members = await self.get_group_members(group_name)
+
+            # Get group policy
+            group_policy_model = await self.policy_manager.get_group_policy(group_name)
+            policy_name = group_policy_model.policy_name
+
+            # Create domain model
+            group_model = GroupModel(
+                group_name=group_name,
+                members=members,
+                policy_name=policy_name,
+            )
+
+            logger.info(f"Retrieved info for group {group_name}")
+            return group_model
+
+    async def is_user_in_group(self, username: str, group_name: str) -> bool:
+        """
+        Check if a specific user is a member of a specific group.
+
+        This method queries the group membership to determine if the user
+        is currently a member. It's useful for authorization checks and
+        membership validation before performing group operations.
+
+        Args:
+            username: The username to check for membership
+            group_name: The name of the group to check membership in
+        """
+        try:
+            members = await self.get_group_members(group_name)
+            return username in members
+        except Exception as e:
+            raise GroupOperationError(
+                f"Failed to check if user {username} is in group {group_name}"
+            ) from e
+
+    async def get_user_groups(self, username: str) -> List[str]:
+        """
+        Retrieve all group names that a specific user is a member of.
+
+        This method iterates through all groups in the system and checks
+        membership for the specified user. The returned list represents
+        all groups where the user has inherited group permissions and
+        access to shared workspaces.
+
+        Args:
+            username: The username to get group memberships for
+        """
+        async with self.operation_context("get_user_groups"):
+            all_groups = await self.list_resources()
+            user_groups = []
+            for group_name in all_groups:
+                if await self.is_user_in_group(username, group_name):
+                    user_groups.append(group_name)
+            user_groups.sort()
+            logger.info(f"User {username} is a member of {len(user_groups)} groups")
+            return user_groups
+
     # Private helper methods
+
+    async def _parse_group_members(self, group_info_output: str) -> List[str]:
+        """Parse group members from 'mc admin group info --json' output."""
+        try:
+            group_info = json.loads(group_info_output)
+            # Example output:
+            # {"status":"success","groupName":"global-user-group","members":["tgu2"],"groupStatus":"enabled","groupPolicy":"group-policy-global-user-group"}
+            return group_info["members"]
+        except Exception as e:
+            raise GroupOperationError(
+                f"Failed to parse group members: {group_info_output}"
+            ) from e
 
     async def _create_group_shared_directory(self, group_name: str) -> None:
         """Create group shared directory structure similar to user home directory."""

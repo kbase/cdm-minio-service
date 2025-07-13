@@ -213,6 +213,7 @@ class MinIOCommandBuilder:
         action: GroupAction,
         group_name: str,
         members: Optional[List[str]] = None,
+        json_format: bool = False,
     ) -> List[str]:
         """Build group management command.
 
@@ -220,6 +221,7 @@ class MinIOCommandBuilder:
             action: Group action to perform
             group_name: Group name
             members: List of members (for add/rm actions)
+            json_format: Whether to use JSON format (for info action)
 
         Returns:
             Command arguments list
@@ -228,6 +230,8 @@ class MinIOCommandBuilder:
         cmd = ["admin", AdminCommand.GROUP.value, action.value, self.alias, group_name]
         if members and action in (GroupAction.ADD, GroupAction.RM):
             cmd.extend(members)
+        if json_format and action == GroupAction.INFO:
+            cmd.append("--json")
         return cmd
 
     def build_group_list_command(self) -> List[str]:
@@ -236,4 +240,4 @@ class MinIOCommandBuilder:
         Returns:
             Command arguments list
         """
-        return ["admin", AdminCommand.GROUP.value, "ls", self.alias]
+        return ["admin", AdminCommand.GROUP.value, "ls", self.alias, "--json"]
