@@ -135,6 +135,8 @@ class GroupManager(ResourceManager[GroupModel]):
         6. Sets up the group's shared directory structure
         7. Creates a welcome file with workspace instructions
 
+        This method is safe to run multiple times and will only perform previously incomplete operations.
+
         The creator is automatically added as the initial group member. Additional members can be added later using add_user_to_group().
 
         The group will have access to:
