@@ -198,6 +198,91 @@ class GroupManager(ResourceManager[GroupModel]):
             )
             return group_model
 
+    async def add_user_to_group(self, username: str, group_name: str) -> None:
+        """
+        Add an existing user to an existing MinIO group, granting them group access permissions.
+
+        This method handles the complete user addition workflow:
+        1. Validates that both the user and group exist
+        2. Adds the user to the group in MinIO (idempotent - safe if already a member)
+        3. The user automatically inherits the group's policy and access permissions
+
+        Once added, the user will have access to the group's shared workspace
+        and inherit all permissions defined in the group's policy.
+
+        Note:
+            This operation is idempotent - adding a user who is already a member
+            of the group will succeed without any changes or errors.
+
+        Args:
+            username: The username to add to the group
+            group_name: The name of the group to add the user to
+        """
+        async with self.operation_context("add_user_to_group"):
+            # Check if group exists
+            if not await self.resource_exists(group_name):
+                raise GroupOperationError(f"Group {group_name} not found")
+
+            # Check if user exists
+            if not await self.user_manager.resource_exists(username):
+                raise GroupOperationError(f"User {username} does not exist")
+
+            # MinIO group add is idempotent - adding an existing member is a no-op
+            # so we don't need to check if user is already in the group
+
+            # Add user to group
+            cmd_args = self._command_builder.build_group_command(
+                GroupAction.ADD, group_name, [username]
+            )
+            result = await self._executor._execute_command(cmd_args)
+            if not result.success:
+                raise GroupOperationError(
+                    f"Failed to add user to group: {result.stderr}"
+                )
+
+            logger.info(f"Added user {username} to group {group_name}")
+
+    async def remove_user_from_group(self, username: str, group_name: str) -> None:
+        """
+        Remove a user from a MinIO group, revoking their group access permissions.
+
+        This method handles the complete user removal workflow:
+        1. Validates that the group exists
+        2. Removes the user from the group in MinIO (idempotent - safe if not a member)
+        3. The user loses access to group policies and shared workspace
+
+        After removal, the user will no longer have access to the group's shared
+        workspace or inherit the group's permissions, but retains their individual
+        user permissions.
+
+        Note:
+            This operation is idempotent - removing a user who is not a member
+            of the group will succeed without any changes or errors.
+
+        Args:
+            username: The username to remove from the group
+            group_name: The name of the group to remove the user from
+        """
+        async with self.operation_context("remove_user_from_group"):
+            # Check if group exists
+            if not await self.resource_exists(group_name):
+                raise GroupOperationError(f"Group {group_name} not found")
+
+            # MinIO group remove is idempotent - removing a non-member is a no-op
+            # so we don't need to check if user is actually in the group
+
+            # Remove user from group
+            cmd_args = self._command_builder.build_group_command(
+                GroupAction.RM, group_name, [username]
+            )
+            result = await self._executor._execute_command(cmd_args)
+            if not result.success:
+                raise GroupOperationError(
+                    f"Failed to remove user from group: {result.stderr}"
+                )
+
+            logger.info(f"Removed user {username} from group {group_name}")
+
     async def get_group_members(self, group_name: str) -> List[str]:
         """
         Retrieve a list of all usernames that are members of the specified group.
