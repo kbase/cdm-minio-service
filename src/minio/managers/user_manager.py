@@ -147,6 +147,8 @@ class UserManager(ResourceManager[UserModel]):
         - Personal general warehouse directory: `s3a://bucket/users-general-warehouse/{username}/`
         - Subdirectories: data/, notebooks/, shared/
 
+        This method is safe to run multiple times and will only perform previously incomplete operations.
+
         Group memberships can be added later using separate group management endpoints.
 
         Args:
