@@ -210,6 +210,61 @@ class UserManager(ResourceManager[UserModel]):
                 accessible_paths=home_paths,  # user home path is accessible via newly created policy
             )
 
+    async def get_user(self, username: str) -> UserModel:
+        """
+        Retrieve comprehensive information about an existing user including all policies and access rights.
+
+        This method gathers complete user information by:
+        1. Verifying the user exists in MinIO
+        2. Collecting all group memberships
+        3. Loading the user's direct policy
+        4. Loading all group policies the user inherits
+        5. Calculating all accessible paths from all policies
+        6. Building a complete UserModel with all permissions
+
+        The returned model provides a complete view of the user's access rights
+        and can be used for authorization decisions and administrative purposes.
+
+        Args:
+            username: The username to retrieve information for
+        """
+        async with self.operation_context("get_user"):
+
+            user_exists = await self.resource_exists(username)
+            if not user_exists:
+                raise UserOperationError(f"User {username} not found")
+
+            # Gather user information
+            user_groups = await self.group_manager.get_user_groups(username)
+            user_policy = await self.policy_manager.get_user_policy(username)
+
+            # Calculate accessible paths
+            all_accessible_paths = set()
+            all_accessible_paths.update(
+                self.policy_manager.get_accessible_paths_from_policy(user_policy)
+            )
+
+            # Process group policies safely
+            group_policies = []
+            for group_name in user_groups:
+                group_policy = await self.policy_manager.get_group_policy(group_name)
+                group_policies.append(group_policy)
+                all_accessible_paths.update(
+                    self.policy_manager.get_accessible_paths_from_policy(group_policy)
+                )
+
+            return UserModel(
+                username=username,
+                access_key=username,  # access key is always the username
+                secret_key="<redacted>",  # Don't return secret in GET requests
+                home_paths=self._get_user_home_paths(username),
+                groups=user_groups,
+                user_policy=user_policy,
+                group_policies=group_policies,
+                total_policies=1 + len(group_policies),  # user policy + group policies
+                accessible_paths=sorted(list(all_accessible_paths)),
+            )
+
     # PRIVATE HELPER METHODS
     def _generate_secure_password(self, length: int = 32) -> str:
         """Generate a secure password for MinIO users."""
