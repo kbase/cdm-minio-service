@@ -1,5 +1,6 @@
 import json
 import logging
+import re
 import secrets
 import string
 from typing import Any, Dict, List, Optional, Tuple
@@ -332,6 +333,23 @@ class UserManager(ResourceManager[UserModel]):
 
             return {"user_policy": user_policy, "group_policies": group_policies}
 
+    async def can_user_share_path(self, path: str, username: str) -> bool:
+        """
+        Determine if a user has permission to share a specific S3 path with others.
+
+        Args:
+            path: The S3 path to check sharing permissions for (e.g., "s3a://bucket/path")
+            username: The username requesting sharing permission
+
+        Returns:
+            bool: True if the user can share this path, False otherwise
+
+        Note:
+            Currently implements simplified logic based on home directory (SQL or general warehouse) ownership.
+            Future versions may implement more sophisticated permission checking.
+        """
+        return self._is_path_in_user_home(path, username)
+
     async def get_user_accessible_paths(self, username: str) -> List[str]:
         """
         Calculate all S3 paths that a user can access through their policies and group memberships.
@@ -375,6 +393,21 @@ class UserManager(ResourceManager[UserModel]):
         """Generate a secure password for MinIO users."""
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         return "".join(secrets.choice(alphabet) for _ in range(length))
+
+    def _is_path_in_user_home(self, path: str, username: str) -> bool:
+        """Check if a path is within the user's home directories (SQL or General warehouse)."""
+        # Check both warehouse prefixes
+        user_home_general_prefix = f"{self.users_general_warehouse_prefix}/{username}/"
+        user_home_sql_prefix = f"{self.users_sql_warehouse_prefix}/{username}/"
+
+        clean_path = re.sub(r"^s3a?://", "", path)
+        # Remove bucket name
+        if "/" in clean_path:
+            path_without_bucket = clean_path.split("/", 1)[1]
+            return path_without_bucket.startswith(
+                user_home_general_prefix
+            ) or path_without_bucket.startswith(user_home_sql_prefix)
+        return False
 
     def _get_user_home_paths(self, username: str) -> list[str]:
         """Get the user's primary home path (general warehouse) and SQL warehouse path."""
