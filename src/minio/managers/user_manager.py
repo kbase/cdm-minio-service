@@ -279,10 +279,6 @@ class UserManager(ResourceManager[UserModel]):
         """
         async with self.operation_context("get_or_rotate_user_credentials"):
 
-            user_exists = await self.resource_exists(username)
-            if not user_exists:
-                raise UserOperationError(f"User {username} not found")
-
             # For unified credentials approach:
             # - Access key is always the username
             # - Secret key is a fresh generated password that we set as the user's password
@@ -294,6 +290,11 @@ class UserManager(ResourceManager[UserModel]):
             cmd_args = self._command_builder.build_user_command(
                 UserAction.ADD, username, secret_key
             )
+
+            user_exists = await self.resource_exists(username)
+            if not user_exists:
+                raise UserOperationError(f"User {username} not found")
+
             password_result = await self._executor._execute_command(cmd_args)
             if not password_result.success:
                 raise UserOperationError(
