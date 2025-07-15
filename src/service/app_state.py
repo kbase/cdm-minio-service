@@ -12,6 +12,12 @@ from typing import NamedTuple
 
 from fastapi import FastAPI, Request
 
+from src.minio.core.minio_client import MinIOClient
+from src.minio.managers.group_manager import GroupManager
+from src.minio.managers.policy_manager import PolicyManager
+from src.minio.managers.user_manager import UserManager
+from src.minio.models.minio_config import MinIOConfig
+from src.service.arg_checkers import not_falsy
 from src.service.kb_auth import KBaseAuth, KBaseUser
 
 logger = logging.getLogger(__name__)
@@ -21,6 +27,10 @@ class AppState(NamedTuple):
     """Holds application state."""
 
     auth: KBaseAuth
+    minio_client: MinIOClient
+    user_manager: UserManager
+    group_manager: GroupManager
+    policy_manager: PolicyManager
 
 
 class RequestState(NamedTuple):
@@ -46,9 +56,33 @@ async def build_app(app: FastAPI) -> None:
     auth = await KBaseAuth.create(auth_url, full_admin_roles=admin_roles)
     logger.info("KBase auth service connected")
 
+    # Initialize MinIO configuration and client
+    logger.info("Initializing MinIO client and managers...")
+    config = MinIOConfig(
+        endpoint=not_falsy(os.getenv("MINIO_ENDPOINT"), "MINIO_ENDPOINT"),
+        access_key=not_falsy(os.getenv("MINIO_ROOT_USER"), "MINIO_ROOT_USER"),
+        secret_key=not_falsy(os.getenv("MINIO_ROOT_PASSWORD"), "MINIO_ROOT_PASSWORD"),
+    )
+
+    minio_client = MinIOClient(config)
+    await minio_client.initialize_session()
+    logger.info("MinIO client session initialized")
+
+    # Initialize all managers with the shared client
+    user_manager = UserManager(minio_client, config)
+    group_manager = GroupManager(minio_client, config)
+    policy_manager = PolicyManager(minio_client, config)
+    logger.info("MinIO managers initialized")
+
     # Store components in app state
     app.state._auth = auth
-    app.state._minio_manager_state = AppState(auth=auth)
+    app.state._minio_manager_state = AppState(
+        auth=auth,
+        minio_client=minio_client,
+        user_manager=user_manager,
+        group_manager=group_manager,
+        policy_manager=policy_manager,
+    )
     logger.info("Application state initialized")
 
 
@@ -59,7 +93,14 @@ async def destroy_app_state(app: FastAPI) -> None:
     Args:
         app: The FastAPI app.
     """
-    # Currently no resources need to be explicitly cleaned up
+    # Close MinIO client session if it exists
+    if hasattr(app.state, "_minio_manager_state") and app.state._minio_manager_state:
+        try:
+            await app.state._minio_manager_state.minio_client.close_session()
+            logger.info("MinIO client session closed")
+        except Exception as e:
+            logger.warning(f"Error closing MinIO client session: {e}")
+
     # https://docs.aiohttp.org/en/stable/client_advanced.html#graceful-shutdown
     await asyncio.sleep(0.250)
     logger.info("Application state destroyed")
@@ -94,7 +135,10 @@ def _get_app_state_from_app(app: FastAPI) -> AppState:
     Raises:
         ValueError: If app state has not been initialized.
     """
-    if not hasattr(app.state, "_minio_manager_state") or not app.state._minio_manager_state:
+    if (
+        not hasattr(app.state, "_minio_manager_state")
+        or not app.state._minio_manager_state
+    ):
         raise ValueError("App state has not been initialized")
     return app.state._minio_manager_state
 

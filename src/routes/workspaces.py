@@ -7,20 +7,13 @@ organizing and managing their data storage.
 """
 
 import logging
-import os
-from functools import lru_cache
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Path
+from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
-from ..minio.core.minio_client import MinIOClient
-from ..minio.managers.group_manager import GroupManager
-from ..minio.managers.policy_manager import PolicyManager
-from ..minio.managers.user_manager import UserManager
-from ..minio.models.minio_config import MinIOConfig
 from ..minio.models.user import UserModel
-from ..service.arg_checkers import not_falsy
+from ..service.app_state import get_app_state
 from ..service.dependencies import auth
 from ..service.exceptions import MinIOManagerError
 from ..service.kb_auth import KBaseUser
@@ -56,32 +49,6 @@ class UserGroupsResponse(BaseModel):
     group_count: Annotated[int, Field(description="Number of groups", ge=0)]
 
 
-# ===== DEPENDENCY INJECTION =====
-
-
-@lru_cache(maxsize=1)
-def get_workspace_managers():
-    """Get initialized managers for workspace operations."""
-
-    config = MinIOConfig(
-        endpoint=not_falsy(os.getenv("MINIO_ENDPOINT"), "MINIO_ENDPOINT"),
-        access_key=not_falsy(os.getenv("MINIO_ROOT_USER"), "MINIO_ROOT_USER"),
-        secret_key=not_falsy(os.getenv("MINIO_ROOT_PASSWORD"), "MINIO_ROOT_PASSWORD"),
-    )
-
-    client = MinIOClient(config)
-    user_manager = UserManager(client, config)
-    group_manager = GroupManager(client, config)
-    policy_manager = PolicyManager(client, config)
-
-    return {
-        "client": client,
-        "user_manager": user_manager,
-        "group_manager": group_manager,
-        "policy_manager": policy_manager,
-    }
-
-
 # ===== USER WORKSPACE ENDPOINTS =====
 
 
@@ -93,15 +60,13 @@ def get_workspace_managers():
 )
 async def get_my_workspace(
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
 ):
     """Get user information for the authenticated user."""
-    managers = get_workspace_managers()
-    user_manager: UserManager = managers["user_manager"]
-
-    await managers["client"].initialize_session()
+    app_state = get_app_state(request)
 
     username = authenticated_user.user
-    user_info = await user_manager.get_user(username)
+    user_info = await app_state.user_manager.get_user(username)
 
     logger.info(f"Retrieved workspace information for user {username}")
     return user_info
@@ -115,15 +80,13 @@ async def get_my_workspace(
 )
 async def get_my_groups(
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
 ):
     """Get all groups the authenticated user belongs to."""
-    managers = get_workspace_managers()
-    group_manager: GroupManager = managers["group_manager"]
-
-    await managers["client"].initialize_session()
+    app_state = get_app_state(request)
 
     username = authenticated_user.user
-    user_groups = await group_manager.get_user_groups(username)
+    user_groups = await app_state.group_manager.get_user_groups(username)
 
     response = UserGroupsResponse(
         username=username,
@@ -144,24 +107,21 @@ async def get_my_groups(
 async def get_group_workspace(
     group_name: Annotated[str, Path(description="Group name", min_length=1)],
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
 ):
     """Get workspace information for a group."""
-    managers = get_workspace_managers()
-    group_manager: GroupManager = managers["group_manager"]
-    policy_manager: PolicyManager = managers["policy_manager"]
-
-    await managers["client"].initialize_session()
+    app_state = get_app_state(request)
 
     username = authenticated_user.user
 
     # Check if user is a member of the group
-    is_member = await group_manager.is_user_in_group(username, group_name)
+    is_member = await app_state.group_manager.is_user_in_group(username, group_name)
     if not is_member:
         raise MinIOManagerError("User is not a member of the group")
     # Get group information
-    group_info = await group_manager.get_group_info(group_name)
-    group_policy = await policy_manager.get_group_policy(group_name)
-    group_accessible_paths = policy_manager.get_accessible_paths_from_policy(
+    group_info = await app_state.group_manager.get_group_info(group_name)
+    group_policy = await app_state.policy_manager.get_group_policy(group_name)
+    group_accessible_paths = app_state.policy_manager.get_accessible_paths_from_policy(
         group_policy
     )
 
