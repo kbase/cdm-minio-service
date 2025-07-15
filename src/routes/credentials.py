@@ -52,7 +52,7 @@ async def get_user_manager() -> UserManager:
     )
 
     client = MinIOClient(config)
-    await client._initialize_session()
+    await client.initialize_session()
 
     return UserManager(client, config)
 
@@ -97,4 +97,4 @@ async def get_credentials(
         return response
 
     finally:
-        await user_manager.client._close_session()
+        await user_manager.client.close_session()

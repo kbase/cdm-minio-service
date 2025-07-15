@@ -28,14 +28,14 @@ class MinIOClient:
 
     async def __aenter__(self):
         """Async context manager entry."""
-        await self._initialize_session()
+        await self.initialize_session()
         return self
 
     async def __aexit__(self):
         """Async context manager exit."""
-        await self._close_session()
+        await self.close_session()
 
-    async def _initialize_session(self):
+    async def initialize_session(self):
         """Initialize the aiobotocore session."""
         try:
             self._session = aiobotocore.session.get_session()
@@ -44,7 +44,7 @@ class MinIOClient:
             logger.error(f"Failed to initialize MinIO session: {e}")
             raise ConnectionError(f"Failed to initialize session: {e}") from e
 
-    async def _close_session(self):
+    async def close_session(self):
         """Close the session and cleanup resources."""
         if self._session:
             # aiobotocore sessions don't need explicit closing
@@ -55,7 +55,7 @@ class MinIOClient:
     async def _get_client(self) -> AsyncIterator[Any]:
         """Get an async S3 client with proper configuration."""
         if not self._session:
-            await self._initialize_session()
+            await self.initialize_session()
 
         async with self._session.create_client(  # type: ignore
             "s3",

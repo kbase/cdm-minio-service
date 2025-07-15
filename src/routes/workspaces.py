@@ -8,6 +8,7 @@ organizing and managing their data storage.
 
 import logging
 import os
+from functools import lru_cache
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Path
@@ -58,8 +59,10 @@ class UserGroupsResponse(BaseModel):
 # ===== DEPENDENCY INJECTION =====
 
 
-async def get_workspace_managers():
+@lru_cache(maxsize=1)
+def get_workspace_managers():
     """Get initialized managers for workspace operations."""
+
     config = MinIOConfig(
         endpoint=not_falsy(os.getenv("MINIO_ENDPOINT"), "MINIO_ENDPOINT"),
         access_key=not_falsy(os.getenv("MINIO_ROOT_USER"), "MINIO_ROOT_USER"),
@@ -67,8 +70,6 @@ async def get_workspace_managers():
     )
 
     client = MinIOClient(config)
-    await client._initialize_session()
-
     user_manager = UserManager(client, config)
     group_manager = GroupManager(client, config)
     policy_manager = PolicyManager(client, config)
@@ -94,18 +95,16 @@ async def get_my_workspace(
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
 ):
     """Get user information for the authenticated user."""
-    managers = await get_workspace_managers()
+    managers = get_workspace_managers()
     user_manager: UserManager = managers["user_manager"]
 
-    try:
-        username = authenticated_user.user
-        user_info = await user_manager.get_user(username)
+    await managers["client"].initialize_session()
 
-        logger.info(f"Retrieved workspace information for user {username}")
-        return user_info
+    username = authenticated_user.user
+    user_info = await user_manager.get_user(username)
 
-    finally:
-        await user_manager.client._close_session()
+    logger.info(f"Retrieved workspace information for user {username}")
+    return user_info
 
 
 @router.get(
@@ -118,26 +117,22 @@ async def get_my_groups(
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
 ):
     """Get all groups the authenticated user belongs to."""
-    managers = await get_workspace_managers()
+    managers = get_workspace_managers()
     group_manager: GroupManager = managers["group_manager"]
 
-    try:
-        username = authenticated_user.user
+    await managers["client"].initialize_session()
 
-        # Get user's groups using GroupManager
-        user_groups = await group_manager.get_user_groups(username)
+    username = authenticated_user.user
+    user_groups = await group_manager.get_user_groups(username)
 
-        response = UserGroupsResponse(
-            username=username,
-            groups=user_groups,
-            group_count=len(user_groups),
-        )
+    response = UserGroupsResponse(
+        username=username,
+        groups=user_groups,
+        group_count=len(user_groups),
+    )
 
-        logger.info(f"Retrieved groups for user {username}")
-        return response
-
-    finally:
-        await managers["client"]._close_session()
+    logger.info(f"Retrieved groups for user {username}")
+    return response
 
 
 @router.get(
@@ -151,33 +146,31 @@ async def get_group_workspace(
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
 ):
     """Get workspace information for a group."""
-    managers = await get_workspace_managers()
+    managers = get_workspace_managers()
     group_manager: GroupManager = managers["group_manager"]
     policy_manager: PolicyManager = managers["policy_manager"]
 
-    try:
-        username = authenticated_user.user
+    await managers["client"].initialize_session()
 
-        # Check if user is a member of the group
-        is_member = await group_manager.is_user_in_group(username, group_name)
-        if not is_member:
-            raise MinIOManagerError("User is not a member of the group")
-        # Get group information
-        group_info = await group_manager.get_group_info(group_name)
-        group_policy = await policy_manager.get_group_policy(group_name)
-        group_accessible_paths = policy_manager.get_accessible_paths_from_policy(
-            group_policy
-        )
+    username = authenticated_user.user
 
-        response = GroupWorkspaceResponse(
-            group_name=group_name,
-            members=group_info.members,
-            member_count=len(group_info.members),
-            accessible_paths=group_accessible_paths,
-        )
+    # Check if user is a member of the group
+    is_member = await group_manager.is_user_in_group(username, group_name)
+    if not is_member:
+        raise MinIOManagerError("User is not a member of the group")
+    # Get group information
+    group_info = await group_manager.get_group_info(group_name)
+    group_policy = await policy_manager.get_group_policy(group_name)
+    group_accessible_paths = policy_manager.get_accessible_paths_from_policy(
+        group_policy
+    )
 
-        logger.info(f"Retrieved group workspace for {group_name} by user {username}")
-        return response
+    response = GroupWorkspaceResponse(
+        group_name=group_name,
+        members=group_info.members,
+        member_count=len(group_info.members),
+        accessible_paths=group_accessible_paths,
+    )
 
-    finally:
-        await managers["client"]._close_session()
+    logger.info(f"Retrieved group workspace for {group_name} by user {username}")
+    return response
