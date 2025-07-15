@@ -2,7 +2,7 @@ import json
 import logging
 import secrets
 import string
-from typing import List, Optional
+from typing import List, Optional, Tuple
 
 from ...service.exceptions import UserOperationError
 from ..core.minio_client import MinIOClient
@@ -264,6 +264,45 @@ class UserManager(ResourceManager[UserModel]):
                 total_policies=1 + len(group_policies),  # user policy + group policies
                 accessible_paths=sorted(list(all_accessible_paths)),
             )
+
+    async def get_or_rotate_user_credentials(self, username: str) -> Tuple[str, str]:
+        """
+        Generate fresh credentials for a user by rotating their password/secret key.
+
+        This method implements a unified credential system where:
+        - Access key is always the username (consistent identifier)
+        - Secret key is a freshly generated secure password
+        - The MinIO user password is updated to match the new secret key
+
+        Args:
+            username: The username to generate fresh credentials for
+        """
+        async with self.operation_context("get_or_rotate_user_credentials"):
+
+            # For unified credentials approach:
+            # - Access key is always the username
+            # - Secret key is a fresh generated password that we set as the user's password
+            access_key = username
+            secret_key = self._generate_secure_password()
+
+            # Update the user's password in MinIO to match the secret key
+            # Note: In MinIO, re-adding a user with a new password effectively updates it
+            cmd_args = self._command_builder.build_user_command(
+                UserAction.ADD, username, secret_key
+            )
+
+            user_exists = await self.resource_exists(username)
+            if not user_exists:
+                raise UserOperationError(f"User {username} not found")
+
+            password_result = await self._executor._execute_command(cmd_args)
+            if not password_result.success:
+                raise UserOperationError(
+                    f"Failed to update password for user {username}: {password_result.stderr}"
+                )
+
+            logger.info(f"Generated fresh credentials for user {username}")
+            return access_key, secret_key
 
     # PRIVATE HELPER METHODS
     def _generate_secure_password(self, length: int = 32) -> str:
