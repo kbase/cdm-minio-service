@@ -2,7 +2,7 @@ import json
 import logging
 import secrets
 import string
-from typing import List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from ...service.exceptions import UserOperationError
 from ..core.minio_client import MinIOClient
@@ -304,7 +304,73 @@ class UserManager(ResourceManager[UserModel]):
             logger.info(f"Generated fresh credentials for user {username}")
             return access_key, secret_key
 
+    # UTILITY METHODS
+
+    async def get_user_policies(self, username: str) -> Dict[str, Any]:
+        """
+        Retrieve all policies that apply to a user, including user's direct policy and all group policies.
+
+        Args:
+            username: The username to get policies for
+        """
+        async with self.operation_context("get_user_policies"):
+            user_exists = await self.resource_exists(username)
+            if not user_exists:
+                raise UserOperationError(f"User {username} not found")
+
+            # Get user's direct policy
+            user_policy = await self.policy_manager.get_user_policy(username)
+
+            # Get user's group policies
+            user_groups = await self.group_manager.get_user_groups(username)
+            group_policies = []
+
+            for group_name in user_groups:
+                group_policy = await self.policy_manager.get_group_policy(group_name)
+                if group_policy:
+                    group_policies.append(group_policy)
+
+            return {"user_policy": user_policy, "group_policies": group_policies}
+
+    async def get_user_accessible_paths(self, username: str) -> List[str]:
+        """
+        Calculate all S3 paths that a user can access through their policies and group memberships.
+
+        This method comprehensively analyzes all policies that apply to the user:
+        1. Extracts accessible paths from the user's direct policy
+        2. Extracts accessible paths from all inherited group policies
+        3. Combines and deduplicates all paths
+        4. Returns a sorted list of unique accessible paths
+
+        Args:
+            username: The username to calculate accessible paths for
+        """
+        async with self.operation_context("get_user_accessible_paths"):
+            # Check if user exists
+            if not await self.resource_exists(username):
+                raise UserOperationError(f"User {username} not found")
+
+            # Get all accessible paths from user policy and group policies
+            all_accessible_paths = set()
+
+            # Add paths from user policy
+            user_policy = await self.policy_manager.get_user_policy(username)
+            all_accessible_paths.update(
+                self.policy_manager.get_accessible_paths_from_policy(user_policy)
+            )
+
+            # Add paths from group policies
+            user_groups = await self.group_manager.get_user_groups(username)
+            for group_name in user_groups:
+                group_policy = await self.policy_manager.get_group_policy(group_name)
+                all_accessible_paths.update(
+                    self.policy_manager.get_accessible_paths_from_policy(group_policy)
+                )
+
+            return sorted(list(all_accessible_paths))
+
     # PRIVATE HELPER METHODS
+
     def _generate_secure_password(self, length: int = 32) -> str:
         """Generate a secure password for MinIO users."""
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
