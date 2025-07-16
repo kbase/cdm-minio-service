@@ -4,7 +4,6 @@ Policy Builder module for modifying MinIO policy documents.
 
 import logging
 import re
-from copy import deepcopy
 from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -43,7 +42,7 @@ class PolicyBuilder:
             policy_model: The base policy model to modify
             bucket_name: The S3 bucket name for path validation
         """
-        self.policy_model = deepcopy(policy_model)
+        self.policy_model = policy_model.model_copy(deep=True)
         self.bucket_name = bucket_name
 
     def add_path_access(
