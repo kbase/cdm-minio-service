@@ -209,11 +209,32 @@ class PolicyBuilder:
         """Remove object-level statements that match the path."""
         target_resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
 
-        self.policy_model.policy_document.statement = [
-            stmt
-            for stmt in self.policy_model.policy_document.statement
-            if not self._statement_matches_resource(stmt, target_resource)
-        ]
+        statements_to_keep = []
+
+        for stmt in self.policy_model.policy_document.statement:
+            if not self._statement_matches_resource(stmt, target_resource):
+                # Statement doesn't contain target resource, keep as-is
+                statements_to_keep.append(stmt)
+            else:
+                # Statement contains target resource
+                resources = (
+                    stmt.resource
+                    if isinstance(stmt.resource, list)
+                    else [stmt.resource]
+                )
+
+                # Remove only the target resource
+                remaining_resources = [r for r in resources if r != target_resource]
+
+                # Only keep statement if it has remaining resources
+                if remaining_resources:
+                    # Create new statement with remaining resources
+                    updated_stmt = stmt.model_copy(
+                        update={"resource": remaining_resources}
+                    )
+                    statements_to_keep.append(updated_stmt)
+
+        self.policy_model.policy_document.statement = statements_to_keep
 
     def _statement_matches_resource(
         self, statement: PolicyStatement, target_resource: str
