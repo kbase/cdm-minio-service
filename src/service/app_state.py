@@ -64,8 +64,7 @@ async def build_app(app: FastAPI) -> None:
         secret_key=not_falsy(os.getenv("MINIO_ROOT_PASSWORD"), "MINIO_ROOT_PASSWORD"),
     )
 
-    minio_client = MinIOClient(config)
-    await minio_client.initialize_session()
+    minio_client = await MinIOClient.create(config)
     logger.info("MinIO client session initialized")
 
     # Initialize all managers with the shared client
