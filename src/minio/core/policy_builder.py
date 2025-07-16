@@ -158,7 +158,7 @@ class PolicyBuilder:
         return None
 
     def _add_to_list_bucket_statement(self, clean_path: str) -> None:
-        """Add path prefixes to the ListBucket statement."""
+        """Add path prefixes to the ListBucket statement in place."""
         list_bucket_stmt = self._find_list_bucket_statement()
         if not list_bucket_stmt or not list_bucket_stmt.condition:
             logger.warning("No ListBucket statement found to add path to")
