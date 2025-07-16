@@ -161,8 +161,7 @@ class PolicyBuilder:
         """Add path prefixes to the ListBucket statement in place."""
         list_bucket_stmt = self._find_list_bucket_statement()
         if not list_bucket_stmt or not list_bucket_stmt.condition:
-            logger.warning("No ListBucket statement found to add path to")
-            return
+            raise PolicyOperationError("No ListBucket statement found to add path to")
 
         prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
         new_prefixes = [f"{clean_path}/*", clean_path]
