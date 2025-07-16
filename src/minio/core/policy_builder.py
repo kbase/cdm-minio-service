@@ -1,5 +1,5 @@
 """
-Policy Builder module for creating and modifying MinIO policy documents.
+Policy Builder module for modifying MinIO policy documents.
 """
 
 import logging
