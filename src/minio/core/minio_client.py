@@ -26,16 +26,28 @@ class MinIOClient:
         self.config = config
         self._session = None
 
+    @classmethod
+    async def create(cls, config: MinIOConfig) -> "MinIOClient":
+        """
+        Create and initialize a MinIOClient instance.
+
+        Args:
+            config: A MinIOConfig object with connection details.
+        """
+        instance = cls(config)
+        await instance.initialize_session()
+        return instance
+
     async def __aenter__(self):
         """Async context manager entry."""
-        await self._initialize_session()
+        await self.initialize_session()
         return self
 
     async def __aexit__(self):
         """Async context manager exit."""
-        await self._close_session()
+        await self.close_session()
 
-    async def _initialize_session(self):
+    async def initialize_session(self):
         """Initialize the aiobotocore session."""
         try:
             self._session = aiobotocore.session.get_session()
@@ -44,7 +56,7 @@ class MinIOClient:
             logger.error(f"Failed to initialize MinIO session: {e}")
             raise ConnectionError(f"Failed to initialize session: {e}") from e
 
-    async def _close_session(self):
+    async def close_session(self):
         """Close the session and cleanup resources."""
         if self._session:
             # aiobotocore sessions don't need explicit closing
@@ -55,7 +67,7 @@ class MinIOClient:
     async def _get_client(self) -> AsyncIterator[Any]:
         """Get an async S3 client with proper configuration."""
         if not self._session:
-            await self._initialize_session()
+            await self.initialize_session()
 
         async with self._session.create_client(  # type: ignore
             "s3",
@@ -275,7 +287,7 @@ class MinIOClient:
                 async for page in paginator.paginate(Bucket=bucket_name, Prefix=prefix):
                     if "Contents" in page:
                         page_objects = [obj["Key"] for obj in page["Contents"]]
-                        
+
                         # Check if adding this page would exceed the limit
                         if len(objects) + len(page_objects) > MAX_LIST_OBJECTS_COUNT:
                             # Add only what we can without exceeding the limit
@@ -286,7 +298,7 @@ class MinIOClient:
                                 f"for bucket {bucket_name} with prefix '{prefix}'"
                             )
                             break
-                        
+
                         objects.extend(page_objects)
 
                 logger.info(

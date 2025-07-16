@@ -9,7 +9,7 @@ from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.security.utils import get_authorization_scheme_param
 from starlette.middleware.base import BaseHTTPMiddleware
 
-from src.routes import credentials, health
+from src.routes import credentials, health, workspaces
 from src.service import app_state
 from src.service.config import configure_logging, get_settings
 from src.service.exception_handlers import universal_error_handler
@@ -76,6 +76,7 @@ def create_application() -> FastAPI:
     # Include routers - organized by business domain
     app.include_router(health.router, tags=["health"])
     app.include_router(credentials.router, tags=["credentials"])
+    app.include_router(workspaces.router, tags=["workspaces"])
 
     # Add startup and shutdown event handlers
     async def startup_event():
