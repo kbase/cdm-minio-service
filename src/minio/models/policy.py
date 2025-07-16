@@ -4,7 +4,7 @@ import json
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import Annotated
 
 
@@ -56,8 +56,10 @@ PERMISSION_LEVEL_ACTIONS = {
 }
 
 
-class PolicyStatement(BaseModel, frozen=True):
+class PolicyStatement(BaseModel):
     """Individual policy statement."""
+
+    model_config = ConfigDict(frozen=True)
 
     effect: Annotated[PolicyEffect, Field(description="Allow or Deny")]
     action: Annotated[
