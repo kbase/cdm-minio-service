@@ -12,6 +12,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Path, Request
 from pydantic import BaseModel, ConfigDict, Field
 
+from ..minio.models.policy import PolicyModel
 from ..minio.models.user import UserModel
 from ..service.app_state import get_app_state
 from ..service.dependencies import auth
@@ -47,6 +48,33 @@ class UserGroupsResponse(BaseModel):
     username: Annotated[str, Field(description="Username", min_length=1)]
     groups: Annotated[list[str], Field(description="Groups user belongs to")]
     group_count: Annotated[int, Field(description="Number of groups", ge=0)]
+
+
+class UserPoliciesResponse(BaseModel):
+    """Response model for user's policy information with full PolicyModel objects."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
+
+    username: Annotated[str, Field(description="Username", min_length=1)]
+    user_policy: Annotated[PolicyModel, Field(description="User's direct policy")]
+    group_policies: Annotated[
+        list[PolicyModel], Field(description="Policies from group memberships")
+    ]
+    total_policies: Annotated[int, Field(description="Number of active policies", ge=0)]
+
+
+class UserAccessiblePathsResponse(BaseModel):
+    """Response model for user's accessible paths."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
+
+    username: Annotated[str, Field(description="Username", min_length=1)]
+    accessible_paths: Annotated[
+        list[str], Field(description="All accessible paths from all policies")
+    ]
+    total_paths: Annotated[
+        int, Field(description="Total number of accessible paths", ge=0)
+    ]
 
 
 # ===== USER WORKSPACE ENDPOINTS =====
@@ -95,6 +123,65 @@ async def get_my_groups(
     )
 
     logger.info(f"Retrieved groups for user {username}")
+    return response
+
+
+@router.get(
+    "/me/policies",
+    response_model=UserPoliciesResponse,
+    summary="Get my policies",
+    description="Get complete policy information for the authenticated user including full PolicyModel objects.",
+)
+async def get_my_policies(
+    authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
+):
+    """Get complete policy information for the authenticated user."""
+    app_state = get_app_state(request)
+
+    username = authenticated_user.user
+
+    policies_data = await app_state.user_manager.get_user_policies(username)
+
+    user_policy = policies_data["user_policy"]
+    group_policies = policies_data["group_policies"]
+
+    response = UserPoliciesResponse(
+        username=username,
+        user_policy=user_policy,
+        group_policies=group_policies,
+        total_policies=1 + len(group_policies),  # user policy + group policies
+    )
+
+    logger.info(f"Retrieved {len(group_policies) + 1} policies for user {username}")
+    return response
+
+
+@router.get(
+    "/me/accessible-paths",
+    response_model=UserAccessiblePathsResponse,
+    summary="Get my accessible paths",
+    description="Get all S3 paths accessible to the authenticated user through their policies and group memberships.",
+)
+async def get_my_accessible_paths(
+    authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
+):
+    """Get all accessible paths for the authenticated user."""
+    app_state = get_app_state(request)
+
+    username = authenticated_user.user
+    accessible_paths = await app_state.user_manager.get_user_accessible_paths(username)
+
+    response = UserAccessiblePathsResponse(
+        username=username,
+        accessible_paths=accessible_paths,
+        total_paths=len(accessible_paths),
+    )
+
+    logger.info(
+        f"Retrieved {len(accessible_paths)} accessible paths for user {username}"
+    )
     return response
 
 
