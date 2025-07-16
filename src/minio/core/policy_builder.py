@@ -1,0 +1,189 @@
+"""
+Policy Builder module for creating and modifying MinIO policy documents.
+"""
+
+import logging
+import re
+from copy import deepcopy
+from typing import Annotated
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from ...service.exceptions import PolicyOperationError
+from ..models.policy import (
+    PERMISSION_LEVEL_ACTIONS,
+    PolicyAction,
+    PolicyEffect,
+    PolicyModel,
+    PolicyPermissionLevel,
+    PolicyStatement,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class PathAccess(BaseModel):
+    """Represents access to a specific S3 path with permission level."""
+
+    model_config = ConfigDict(frozen=True)
+
+    path: Annotated[str, Field(description="S3 path for access control", min_length=1)]
+    permission_level: Annotated[
+        PolicyPermissionLevel, Field(description="Level of access permission")
+    ]
+
+
+class PolicyBuilder:
+
+    def __init__(self, policy_model: PolicyModel, bucket_name: str):
+        """
+        Initialize the PolicyBuilder with a policy model and bucket name.
+
+        Args:
+            policy_model: The base policy model to modify
+            bucket_name: The S3 bucket name for path validation
+        """
+        self.policy_model = deepcopy(policy_model)
+        self.bucket_name = bucket_name
+
+    def add_path_access(
+        self, path: str, permission_level: PolicyPermissionLevel
+    ) -> "PolicyBuilder":
+        """
+        Add access to a path with specified permission level.
+
+        Args:
+            path: The S3 path to grant access to (e.g., "s3a://bucket/path/to/data")
+            permission_level: The level of access to grant (READ, WRITE, or ADMIN)
+
+        Returns:
+            PolicyBuilder: A new builder instance with the path access added
+
+        Raises:
+            PolicyOperationError: If the path format is invalid
+        """
+        clean_path = self._normalize_path(path)
+        path_access = PathAccess(path=clean_path, permission_level=permission_level)
+
+        # Create new builder with modifications
+        new_builder = PolicyBuilder(self.policy_model, self.bucket_name)
+        new_builder._add_path_access_internal(path_access)
+        return new_builder
+
+    def build(self) -> PolicyModel:
+        """
+        Build the final policy model.
+
+        Returns:
+            PolicyModel: A deep copy of the modified policy model
+        """
+        return deepcopy(self.policy_model)
+
+    def _add_path_access_internal(self, path_access: PathAccess) -> None:
+        """Internal method to add path access to the policy."""
+        # Check for existing access to avoid duplicates
+        if self._has_path_access(path_access.path):
+            logger.warning(f"Path {path_access.path} already has access, skipping")
+            return
+
+        # Add to ListBucket statement
+        self._add_to_list_bucket_statement(path_access.path)
+
+        # Add object-level statement
+        self._add_object_statement(path_access.path, path_access.permission_level)
+
+    def _normalize_path(self, path: str) -> str:
+        """
+        Normalize S3 path to bucket-relative format.
+
+        Args:
+            path: The S3 path to normalize
+
+        Returns:
+            str: The normalized path (bucket-relative)
+
+        Raises:
+            PolicyOperationError: If the path format is invalid
+        """
+        if not path.startswith(("s3://", "s3a://")):
+            raise PolicyOperationError(
+                f"Invalid S3 path format: {path}. Must start with s3:// or s3a://"
+            )
+
+        # Extract bucket and path from S3 URL
+        path_without_scheme = re.sub(r"^s3a?://", "", path)
+        path_parts = path_without_scheme.split("/", 1)
+
+        if len(path_parts) < 2:
+            raise PolicyOperationError(
+                f"S3 path must include a path component after bucket: {path}"
+            )
+
+        bucket_in_path, relative_path = path_parts
+
+        # Validate bucket matches configuration
+        if bucket_in_path != self.bucket_name:
+            raise PolicyOperationError(
+                f"Path bucket '{bucket_in_path}' does not match configured bucket '{self.bucket_name}'"
+            )
+
+        return relative_path.rstrip("/")
+
+    def _has_path_access(self, clean_path: str) -> bool:
+        """Check if the policy already grants access to the specified path."""
+        target_resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
+
+        for statement in self.policy_model.policy_document.statement:
+            if statement.effect == PolicyEffect.ALLOW:
+                resources = (
+                    statement.resource
+                    if isinstance(statement.resource, list)
+                    else [statement.resource]
+                )
+                if target_resource in resources:
+                    return True
+        return False
+
+    def _find_list_bucket_statement(self) -> PolicyStatement | None:
+        """Find the ListBucket statement with prefix conditions."""
+        for stmt in self.policy_model.policy_document.statement:
+            if (
+                PolicyAction.LIST_BUCKET
+                in (stmt.action if isinstance(stmt.action, list) else [stmt.action])
+                and stmt.condition
+                and "StringLike" in stmt.condition
+                and "s3:prefix" in stmt.condition["StringLike"]
+            ):
+                return stmt
+        return None
+
+    def _add_to_list_bucket_statement(self, clean_path: str) -> None:
+        """Add path prefixes to the ListBucket statement."""
+        list_bucket_stmt = self._find_list_bucket_statement()
+        if not list_bucket_stmt or not list_bucket_stmt.condition:
+            logger.warning("No ListBucket statement found to add path to")
+            return
+
+        prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
+        new_prefixes = [f"{clean_path}/*", clean_path]
+
+        for prefix in new_prefixes:
+            if prefix not in prefixes:
+                prefixes.append(prefix)
+
+    def _add_object_statement(
+        self, clean_path: str, permission_level: PolicyPermissionLevel
+    ) -> None:
+        """Add object-level permissions statement."""
+        actions = PERMISSION_LEVEL_ACTIONS[permission_level]
+        resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
+
+        new_statement = PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=actions,
+            resource=[resource],
+            condition=None,
+            principal=None,
+        )
+
+        self.policy_model.policy_document.statement.append(new_statement)

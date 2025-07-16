@@ -34,7 +34,29 @@ class PolicyAction(str, Enum):
     ALL_ACTIONS = "s3:*"
 
 
-class PolicyStatement(BaseModel):
+class PolicyPermissionLevel(str, Enum):
+    """Simplified permission levels."""
+
+    READ = "read"
+    WRITE = "write"
+    ADMIN = "admin"
+
+
+# Permission level to action mappings
+PERMISSION_LEVEL_ACTIONS = {
+    PolicyPermissionLevel.READ: [
+        PolicyAction.GET_OBJECT,
+    ],
+    PolicyPermissionLevel.WRITE: [
+        PolicyAction.GET_OBJECT,
+        PolicyAction.PUT_OBJECT,
+        PolicyAction.DELETE_OBJECT,
+    ],
+    PolicyPermissionLevel.ADMIN: [PolicyAction.ALL_ACTIONS],
+}
+
+
+class PolicyStatement(BaseModel, frozen=True):
     """Individual policy statement."""
 
     effect: Annotated[PolicyEffect, Field(description="Allow or Deny")]
