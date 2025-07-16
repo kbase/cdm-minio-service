@@ -80,16 +80,22 @@ class PolicyBuilder:
 
     def _add_path_access_internal(self, path_access: PathAccess) -> None:
         """Internal method to add path access to the policy."""
-        # Check for existing access to avoid duplicates
-        if self._has_path_access(path_access.path):
-            logger.warning(f"Path {path_access.path} already has access, skipping")
-            return
+        # Remove any existing access to allow permission level changes
+        self._remove_path_access_internal(path_access.path)
 
         # Add to ListBucket statement
         self._add_to_list_bucket_statement(path_access.path)
 
         # Add object-level statement
         self._add_object_statement(path_access.path, path_access.permission_level)
+
+    def _remove_path_access_internal(self, clean_path: str) -> None:
+        """Internal method to remove path access from the policy."""
+        # Remove from ListBucket statement
+        self._remove_from_list_bucket_statement(clean_path)
+
+        # Remove object-level statements
+        self._remove_object_statements(clean_path)
 
     def _normalize_path(self, path: str) -> str:
         """
@@ -169,6 +175,19 @@ class PolicyBuilder:
             if prefix not in prefixes:
                 prefixes.append(prefix)
 
+    def _remove_from_list_bucket_statement(self, clean_path: str) -> None:
+        """Remove path prefixes from the ListBucket statement."""
+        list_bucket_stmt = self._find_list_bucket_statement()
+        if not list_bucket_stmt or not list_bucket_stmt.condition:
+            raise PolicyOperationError("No ListBucket statement found to add path to")
+
+        prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
+        prefixes_to_remove = {f"{clean_path}/*", clean_path}
+
+        list_bucket_stmt.condition["StringLike"]["s3:prefix"] = [
+            prefix for prefix in prefixes if prefix not in prefixes_to_remove
+        ]
+
     def _add_object_statement(
         self, clean_path: str, permission_level: PolicyPermissionLevel
     ) -> None:
@@ -185,3 +204,27 @@ class PolicyBuilder:
         )
 
         self.policy_model.policy_document.statement.append(new_statement)
+
+    def _remove_object_statements(self, clean_path: str) -> None:
+        """Remove object-level statements that match the path."""
+        target_resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
+
+        self.policy_model.policy_document.statement = [
+            stmt
+            for stmt in self.policy_model.policy_document.statement
+            if not self._statement_matches_resource(stmt, target_resource)
+        ]
+
+    def _statement_matches_resource(
+        self, statement: PolicyStatement, target_resource: str
+    ) -> bool:
+        """Check if a statement matches a specific resource."""
+        if statement.effect != PolicyEffect.ALLOW:
+            return False
+
+        resources = (
+            statement.resource
+            if isinstance(statement.resource, list)
+            else [statement.resource]
+        )
+        return target_resource in resources
