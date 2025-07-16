@@ -77,7 +77,7 @@ class PolicyBuilder:
         Returns:
             PolicyModel: A deep copy of the modified policy model
         """
-        return deepcopy(self.policy_model)
+        return self.policy_model.model_copy(deep=True)
 
     def _add_path_access_internal(self, path_access: PathAccess) -> None:
         """Internal method to add path access to the policy."""
