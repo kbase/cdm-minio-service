@@ -27,18 +27,6 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 # ===== RESPONSE MODELS =====
 
 
-class UserWorkspaceResponse(BaseModel):
-    """Response model for user workspace information."""
-
-    model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
-
-    username: Annotated[str, Field(description="Username", min_length=1)]
-    home_paths: Annotated[list[str], Field(description="User's home directory paths")]
-    accessible_paths: Annotated[list[str], Field(description="User's accessible paths")]
-    groups: Annotated[list[str], Field(description="Groups user belongs to")]
-    total_policies: Annotated[int, Field(description="Number of active policies", ge=0)]
-
-
 class GroupWorkspaceResponse(BaseModel):
     """Response model for group workspace information."""
 
