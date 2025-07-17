@@ -105,9 +105,10 @@ class UserManager(ResourceManager[UserModel]):
                 user["accessKey"] for user in users_data if "accessKey" in user
             ]
             return usernames
-        except json.JSONDecodeError as e:
-            self.logger.error(f"Failed to parse JSON from list_users command: {e}")
-            return []
+        except Exception as e:
+            raise UserOperationError(
+                f"Failed to parse user list command output: {stdout}"
+            ) from e
 
     # === Pre/Post Delete Cleanup Overrides ===
 
