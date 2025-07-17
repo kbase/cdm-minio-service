@@ -9,12 +9,11 @@ from typing import NamedTuple
 from fastapi import status
 
 from src.service.errors import ErrorType
-from src.service.exceptions import (
+from src.service.exceptions import (  # MinIO specific exceptions
     AuthenticationError,
     BucketOperationError,
-    BucketValidationError,
-    ConfigurationError,
     ConnectionError,
+    DataGovernanceError,
     GroupOperationError,
     InvalidAuthHeaderError,
     InvalidTokenError,
@@ -22,16 +21,16 @@ from src.service.exceptions import (
     MinIOManagerError,
     MissingRoleError,
     MissingTokenError,
-    PolicyValidationError,
     PolicyOperationError,
+    PolicyValidationError,
     UserOperationError,
-    ValidationError,
 )
 
 _H400 = status.HTTP_400_BAD_REQUEST
 _H401 = status.HTTP_401_UNAUTHORIZED
 _H403 = status.HTTP_403_FORBIDDEN
 _H404 = status.HTTP_404_NOT_FOUND
+_H409 = status.HTTP_409_CONFLICT
 _H500 = status.HTTP_500_INTERNAL_SERVER_ERROR
 _H503 = status.HTTP_503_SERVICE_UNAVAILABLE
 
@@ -60,10 +59,8 @@ _ERR_MAP = {
     BucketOperationError: ErrorMapping(ErrorType.BUCKET_OPERATION_ERROR, _H500),
     UserOperationError: ErrorMapping(ErrorType.USER_OPERATION_ERROR, _H400),
     GroupOperationError: ErrorMapping(ErrorType.GROUP_OPERATION_ERROR, _H400),
+    DataGovernanceError: ErrorMapping(ErrorType.DATA_GOVERNANCE_ERROR, _H403),
     ConnectionError: ErrorMapping(ErrorType.CONNECTION_ERROR, _H503),
-    ConfigurationError: ErrorMapping(ErrorType.CONFIGURATION_ERROR, _H500),
-    BucketValidationError: ErrorMapping(ErrorType.BUCKET_VALIDATION_ERROR, _H400),
-    ValidationError: ErrorMapping(ErrorType.REQUEST_VALIDATION_FAILED, _H400),
     # Base error fallback
     MinIOError: ErrorMapping(ErrorType.MINIO_ERROR, _H500),
 }

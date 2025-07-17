@@ -43,13 +43,13 @@ class MissingRoleError(AuthenticationError):
 
 
 class MinIOManagerError(MinIOError):
-    """Base exception for MinIO Manager operations."""
+    """Base exception for all MinIO Manager operations."""
 
     pass
 
 
 class PolicyValidationError(MinIOManagerError):
-    """Raised when policy content validation fails."""
+    """Raised when MinIO policy content validation fails."""
 
     pass
 
@@ -67,19 +67,25 @@ class BucketValidationError(MinIOManagerError):
 
 
 class BucketOperationError(MinIOManagerError):
-    """Raised when bucket operations fail."""
+    """Raised when MinIO bucket operations fail."""
 
     pass
 
 
 class UserOperationError(MinIOManagerError):
-    """Raised when user operations fail."""
+    """Raised when MinIO user operations fail."""
 
     pass
 
 
 class GroupOperationError(MinIOManagerError):
-    """Raised when group operations fail."""
+    """Raised when MinIO group operations fail."""
+
+    pass
+
+
+class DataGovernanceError(MinIOManagerError):
+    """Raised when data governance validation fails."""
 
     pass
 
@@ -91,12 +97,6 @@ class ValidationError(MinIOManagerError):
 
 
 class ConnectionError(MinIOManagerError):
-    """Raised when MinIO connection fails."""
-
-    pass
-
-
-class ConfigurationError(MinIOManagerError):
-    """Raised when configuration is invalid."""
+    """Raised when MinIO server connection fails."""
 
     pass
