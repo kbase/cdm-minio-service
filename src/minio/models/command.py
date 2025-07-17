@@ -35,13 +35,6 @@ class PolicyAction(str, Enum):
     DETACH = "detach"
     ENTITIES = "entities"
 
-    # S3 Action Constants
-    ALL_ACTIONS = "s3:*"
-    GET_OBJECT = "s3:GetObject"
-    PUT_OBJECT = "s3:PutObject"
-    DELETE_OBJECT = "s3:DeleteObject"
-    LIST_BUCKET = "s3:ListBucket"
-
 
 class GroupAction(str, Enum):
     """Group management actions."""
