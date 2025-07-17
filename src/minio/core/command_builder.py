@@ -79,6 +79,7 @@ class MinIOCommandBuilder:
         action: PolicyAction,
         policy_name: Optional[str] = None,
         file_path: Optional[str] = None,
+        json_format: bool = False,
     ) -> List[str]:
         """Build policy management command.
 
@@ -86,6 +87,7 @@ class MinIOCommandBuilder:
             action: Policy action to perform
             policy_name: Policy name (required for all actions except LIST)
             file_path: Policy file path (required for CREATE action)
+            json_format: Whether to use JSON format (for list action)
 
         Returns:
             Command arguments list
@@ -114,6 +116,10 @@ class MinIOCommandBuilder:
         # Add file_path for CREATE action
         if file_path and action == PolicyAction.CREATE:
             cmd.append(file_path)
+
+        # Add --json flag for LIST action
+        if json_format and action == PolicyAction.LIST:
+            cmd.append("--json")
 
         return cmd
 
