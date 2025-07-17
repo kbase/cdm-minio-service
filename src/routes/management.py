@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from ..minio.models.user import UserModel
 from ..service.app_state import get_app_state
 from ..service.dependencies import require_admin
-from ..service.exceptions import UserOperationError
+from ..service.exceptions import GroupOperationError, UserOperationError
 
 logger = logging.getLogger(__name__)
 
@@ -53,6 +53,24 @@ class UserManagementResponse(BaseModel):
     total_policies: Annotated[int, Field(description="Number of active policies", ge=0)]
     operation: Annotated[
         str, Field(description="Operation performed (create/update/rotate)")
+    ]
+    performed_by: Annotated[
+        str, Field(description="Admin who performed the operation", min_length=1)
+    ]
+    timestamp: Annotated[datetime, Field(description="When operation was performed")]
+
+
+class GroupManagementResponse(BaseModel):
+    """Response model for group management operations."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
+
+    group_name: Annotated[str, Field(description="Group name", min_length=1)]
+    members: Annotated[list[str], Field(description="Group members")]
+    member_count: Annotated[int, Field(description="Number of members", ge=0)]
+    policy_name: Annotated[str, Field(description="Associated policy name")]
+    operation: Annotated[
+        str, Field(description="Operation performed (create/update/delete)")
     ]
     performed_by: Annotated[
         str, Field(description="Admin who performed the operation", min_length=1)
@@ -206,4 +224,174 @@ async def delete_user(
     )
 
     logger.info(f"Admin {authenticated_user.user} deleted user {username}")
+    return response
+
+
+# ===== GROUP MANAGEMENT ENDPOINTS =====
+
+
+@router.get(
+    "/groups",
+    summary="List all groups",
+    description="Get a list of all groups in the system with membership information.",
+)
+async def list_groups(
+    request: Request,
+    authenticated_user=Depends(require_admin),
+):
+    """List all groups in the system."""
+    app_state = get_app_state(request)
+
+    group_names = await app_state.group_manager.list_resources()
+
+    groups = []
+    for group_name in group_names:
+        try:
+            group_info = await app_state.group_manager.get_group_info(group_name)
+            groups.append(
+                {
+                    "group_name": group_info.group_name,
+                    "members": group_info.members,
+                    "member_count": len(group_info.members),
+                    "policy_name": group_info.policy_name,
+                }
+            )
+        except Exception as e:
+            logger.warning(f"Failed to get info for group {group_name}: {e}")
+
+    logger.info(f"Admin {authenticated_user.user} listed {len(groups)} groups")
+    return {"groups": groups, "total_count": len(group_names)}
+
+
+@router.post(
+    "/groups/{group_name}",
+    response_model=GroupManagementResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create group",
+    description="Create a new group with shared workspace and policy configuration.",
+)
+async def create_group(
+    group_name: Annotated[str, Path(description="Group name to create", min_length=1)],
+    request: Request,
+    authenticated_user=Depends(require_admin),
+):
+    """Create a new group."""
+    app_state = get_app_state(request)
+
+    group_info = await app_state.group_manager.create_group(
+        group_name=group_name,
+        creator=authenticated_user.user,
+    )
+
+    response = GroupManagementResponse(
+        group_name=group_info.group_name,
+        members=group_info.members,
+        member_count=len(group_info.members),
+        policy_name=str(group_info.policy_name),
+        operation="create",
+        performed_by=authenticated_user.user,
+        timestamp=datetime.now(),
+    )
+
+    logger.info(f"Admin {authenticated_user.user} created group {group_name}")
+    return response
+
+
+@router.post(
+    "/groups/{group_name}/members/{username}",
+    response_model=GroupManagementResponse,
+    summary="Add group member",
+    description="Add a user to the specified group.",
+)
+async def add_group_member(
+    group_name: Annotated[str, Path(description="Group name", min_length=1)],
+    username: Annotated[str, Path(description="Username to add", min_length=1)],
+    request: Request,
+    authenticated_user=Depends(require_admin),
+):
+    """Add a member to a group."""
+    app_state = get_app_state(request)
+
+    await app_state.group_manager.add_user_to_group(username, group_name)
+
+    # Get updated group info
+    group_info = await app_state.group_manager.get_group_info(group_name)
+
+    response = GroupManagementResponse(
+        group_name=group_info.group_name,
+        members=group_info.members,
+        member_count=len(group_info.members),
+        policy_name=str(group_info.policy_name),
+        operation="add_member",
+        performed_by=authenticated_user.user,
+        timestamp=datetime.now(),
+    )
+
+    logger.info(
+        f"Admin {authenticated_user.user} added {username} to group {group_name}"
+    )
+    return response
+
+
+@router.delete(
+    "/groups/{group_name}/members/{username}",
+    response_model=GroupManagementResponse,
+    summary="Remove group member",
+    description="Remove a user from the specified group.",
+)
+async def remove_group_member(
+    group_name: Annotated[str, Path(description="Group name", min_length=1)],
+    username: Annotated[str, Path(description="Username to remove", min_length=1)],
+    request: Request,
+    authenticated_user=Depends(require_admin),
+):
+    """Remove a member from a group."""
+    app_state = get_app_state(request)
+
+    await app_state.group_manager.remove_user_from_group(username, group_name)
+
+    # Get updated group info
+    group_info = await app_state.group_manager.get_group_info(group_name)
+
+    response = GroupManagementResponse(
+        group_name=group_info.group_name,
+        members=group_info.members,
+        member_count=len(group_info.members),
+        policy_name=str(group_info.policy_name),
+        operation="remove_member",
+        performed_by=authenticated_user.user,
+        timestamp=datetime.now(),
+    )
+
+    logger.info(
+        f"Admin {authenticated_user.user} removed {username} from group {group_name}"
+    )
+    return response
+
+
+@router.delete(
+    "/groups/{group_name}",
+    response_model=ResourceDeleteResponse,
+    summary="Delete group",
+    description="Delete group and cleanup all associated resources.",
+)
+async def delete_group(
+    group_name: Annotated[str, Path(description="Group name to delete", min_length=1)],
+    request: Request,
+    authenticated_user=Depends(require_admin),
+):
+    """Delete a group."""
+    app_state = get_app_state(request)
+
+    success = await app_state.group_manager.delete_resource(group_name)
+    if not success:
+        raise GroupOperationError(f"Failed to delete group {group_name}")
+
+    response = ResourceDeleteResponse(
+        resource_type="group",
+        resource_name=group_name,
+        message=f"Group {group_name} deleted successfully",
+    )
+
+    logger.info(f"Admin {authenticated_user.user} deleted group {group_name}")
     return response
