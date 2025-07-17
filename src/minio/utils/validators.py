@@ -1,3 +1,10 @@
+"""
+MinIO Data Governance Service - Comprehensive Validation Utilities
+
+This module contains all validation logic for the MinIO Manager Service,
+organized by domain and focused on data governance requirements.
+"""
+
 import re
 
 from ...service.arg_checkers import not_falsy
@@ -184,12 +191,116 @@ def validate_bucket_name(bucket_name: str, index: int | None = None):
 # =============================================================================
 
 
+def validate_s3_path(path: str) -> str:
+    """
+    Validate S3 path for data governance operations with strict AWS compliance.
+
+    Data governance always requires strict path validation for:
+    - Security (prevent path traversal)
+    - Consistency (standardized S3 URL formats)
+    - Compliance (AWS S3 standards)
+    - Cross-platform compatibility
+
+    Args:
+        path: S3 path to validate (must start with s3:// or s3a://)
+
+    Returns:
+        str: Validated S3 path
+
+    Raises:
+        PolicyValidationError: If path validation fails
+    """
+    path = not_falsy(path, "S3 path")
+    path = path.strip()
+
+    # Always enforce S3 URL format for data governance
+    if not path.startswith(("s3://", "s3a://")):
+        raise PolicyValidationError(
+            "S3 path must start with 's3://' or 's3a://' protocol"
+        )
+
+    # Extract protocol, bucket, and key components
+    protocol_len = 5 if path.startswith("s3://") else 6
+    path_without_protocol = path[protocol_len:]
+
+    if not path_without_protocol:
+        raise PolicyValidationError("S3 path must include a bucket name")
+
+    path_parts = path_without_protocol.split("/", 1)
+    bucket = path_parts[0]
+
+    # Validate bucket name using bucket validator
+    validate_bucket_name(bucket)
+
+    # Validate object key if present
+    if len(path_parts) > 1 and path_parts[1]:
+        key = path_parts[1]
+        _validate_s3_object_key(key)
+
+    return path
+
+
+def _validate_s3_object_key(key: str) -> None:
+    """Validate S3 object key according to AWS standards."""
+    # AWS S3 object key restrictions
+    if len(key) > 1024:
+        raise PolicyValidationError("S3 object key cannot exceed 1024 characters")
+
+    # Check for invalid characters in key
+    invalid_chars = ["\n", "\r", "\0"]
+    for char in invalid_chars:
+        if char in key:
+            raise PolicyValidationError(
+                "S3 object key cannot contain control characters"
+            )
+
+    # Leading/trailing whitespace should be avoided
+    if key != key.strip():
+        raise PolicyValidationError(
+            "S3 object key should not have leading or trailing whitespace"
+        )
+
+    # Empty key segments (double slashes) should be avoided
+    if "//" in key:
+        raise PolicyValidationError(
+            "S3 object key should not contain empty path segments"
+        )
+
+    # Check for path traversal attacks
+    if "../" in key or "/.." in key or key.startswith("../") or key.endswith("/.."):
+        raise PolicyValidationError(
+            "S3 object key contains path traversal sequences - this is a security violation"
+        )
+
+    # Check for URL-encoded path traversal attacks
+    url_encoded_patterns = [
+        "%2e%2e%2f",
+        "%2e%2e/",
+        "%2e%2e\\",
+        "%2f%2e%2e",
+        "..%2f",
+        "%5c%2e%2e",
+    ]
+    key_lower = key.lower()
+    for pattern in url_encoded_patterns:
+        if pattern in key_lower:
+            raise PolicyValidationError(
+                "S3 object key contains encoded path traversal sequences - this is a security violation"
+            )
+
+    # Check for multiple dots and other evasion techniques
+    if "...." in key or "..\\." in key or "..\\" in key:
+        raise PolicyValidationError(
+            "S3 object key contains suspicious path patterns - this is a security violation"
+        )
+
+
 def validate_path_prefix(prefix: str) -> str:
     """
     Validates a prefix to ensure it's a valid, non-empty path component.
 
     - Must not be empty or whitespace.
-    - Must not contain path separators ('\\' and '..') to prevent security issues.
+    - Must not contain path separators to prevent security issues.
 
     Args:
         prefix: The prefix string to validate.
@@ -200,9 +311,7 @@ def validate_path_prefix(prefix: str) -> str:
     Raises:
         ValidationError: If the prefix is invalid.
     """
-    if not prefix or not prefix.strip():
-        raise ValidationError("Path prefix cannot be empty or contain only whitespace.")
-
+    prefix = not_falsy(prefix, "Path prefix")
     stripped_prefix = prefix.strip()
 
     if "\\" in stripped_prefix or ".." in stripped_prefix:

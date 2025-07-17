@@ -14,6 +14,7 @@ class ErrorType(Enum):
     :ivar error_type: a brief string describing the error type.
     """
 
+    # ----- Authentication error types -----
     AUTHENTICATION_FAILED = (10000, "Authentication failed")
     """ A general authentication error. """
 
@@ -30,44 +31,35 @@ class ErrorType(Enum):
     """ The user is missing a required role. """
 
     # ----- MinIO specific error types -----
-    MINIO_ERROR = (20000, "MinIO error")
-    """ A general error related to MinIO. """
+    MINIO_ERROR = (20000, "MinIO service error")
+    """ A general error related to MinIO service. """
 
-    MINIO_MANAGER_ERROR = (20010, "MinIO Manager error")
+    MINIO_MANAGER_ERROR = (20010, "MinIO manager error")
     """ A general error related to MinIO Manager operations. """
 
-    POLICY_VALIDATION_ERROR = (20015, "Policy validation error")
-    """ Policy content validation failed. """
+    POLICY_VALIDATION_ERROR = (20015, "MinIO policy validation error")
+    """ MinIO policy content validation failed. """
 
-    POLICY_OPERATION_ERROR = (20017, "MinIO policy operation error")
+    POLICY_OPERATION_ERROR = (20016, "MinIO policy operation error")
     """ MinIO policy operation failed. """
 
-    BUCKET_VALIDATION_ERROR = (20016, "Bucket validation error")
-    """ Bucket name or configuration validation failed. """
+    BUCKET_OPERATION_ERROR = (20020, "MinIO bucket operation error")
+    """ A MinIO bucket operation failed. """
 
-    BUCKET_OPERATION_ERROR = (20020, "Bucket operation error")
-    """ A bucket operation failed. """
+    USER_OPERATION_ERROR = (20030, "MinIO user operation error")
+    """ A MinIO user operation failed. """
 
-    USER_OPERATION_ERROR = (20030, "User operation error")
-    """ A user operation failed. """
+    GROUP_OPERATION_ERROR = (20040, "MinIO group operation error")
+    """ A MinIO group operation failed. """
 
-    GROUP_OPERATION_ERROR = (20040, "Group operation error")
-    """ A group operation failed. """
+    DATA_GOVERNANCE_ERROR = (20042, "Data governance policy violation")
+    """ A data governance policy was violated. """
 
-    CONNECTION_ERROR = (20050, "Connection error")
-    """ MinIO connection failed. """
+    CONNECTION_ERROR = (20050, "MinIO connection error")
+    """ MinIO server connection failed. """
 
-    CONFIGURATION_ERROR = (20060, "Configuration error")
+    CONFIGURATION_ERROR = (20060, "MinIO configuration error")
     """ MinIO configuration is invalid. """
-
-    MINIO_PATH_NOT_FOUND = (20070, "MinIO path not found")
-    """ The MinIO path was not found at the specified path. """
-
-    MINIO_OPERATION_ERROR = (20080, "MinIO operation error")
-    """ An operation on a MinIO path failed. """
-
-    MINIO_QUERY_ERROR = (20090, "MinIO query error")
-    """ There was an error executing a MinIO query. """
 
     REQUEST_VALIDATION_FAILED = (30010, "Request validation failed")
     """ A request to a service failed validation of the request. """
