@@ -15,6 +15,7 @@ from fastapi import FastAPI, Request
 from src.minio.core.minio_client import MinIOClient
 from src.minio.managers.group_manager import GroupManager
 from src.minio.managers.policy_manager import PolicyManager
+from src.minio.managers.sharing_manager import SharingManager
 from src.minio.managers.user_manager import UserManager
 from src.minio.models.minio_config import MinIOConfig
 from src.service.arg_checkers import not_falsy
@@ -31,6 +32,7 @@ class AppState(NamedTuple):
     user_manager: UserManager
     group_manager: GroupManager
     policy_manager: PolicyManager
+    sharing_manager: SharingManager
 
 
 class RequestState(NamedTuple):
@@ -71,6 +73,7 @@ async def build_app(app: FastAPI) -> None:
     user_manager = UserManager(minio_client, config)
     group_manager = GroupManager(minio_client, config)
     policy_manager = PolicyManager(minio_client, config)
+    sharing_manager = SharingManager(minio_client, config)
     logger.info("MinIO managers initialized")
 
     # Store components in app state
@@ -81,6 +84,7 @@ async def build_app(app: FastAPI) -> None:
         user_manager=user_manager,
         group_manager=group_manager,
         policy_manager=policy_manager,
+        sharing_manager=sharing_manager,
     )
     logger.info("Application state initialized")
 
