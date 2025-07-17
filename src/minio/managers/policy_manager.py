@@ -72,7 +72,9 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     def _build_list_command(self) -> List[str]:
         """Build command to list all policies."""
-        return self._command_builder.build_policy_command(CommandPolicyAction.LIST)
+        return self._command_builder.build_policy_command(
+            CommandPolicyAction.LIST, json_format=True
+        )
 
     def _build_delete_command(self, name: str) -> List[str]:
         """Build command to delete a policy."""
@@ -81,14 +83,19 @@ class PolicyManager(ResourceManager[PolicyModel]):
         )
 
     def _parse_list_output(self, stdout: str) -> List[str]:
-        """Parse policy list command output."""
-        # Parse policy names from the output
-        policy_names = [
-            line.strip()
-            for line in stdout.split("\n")
-            if line.strip() and not line.startswith("Policy")
-        ]
-        return policy_names
+        """Parse policy list command JSON output."""
+        try:
+            policy_names = []
+            # Each line is a separate JSON object with format: {"status":"success","policy":"policyname",...}
+            for line in stdout.strip().split("\n"):
+                if line.strip():
+                    policy_data = json.loads(line)
+                    policy_names.append(policy_data["policy"])
+            return policy_names
+        except Exception as e:
+            raise PolicyOperationError(
+                f"Failed to parse policy list command output: {stdout}"
+            ) from e
 
     # === CORE POLICY CRUD OPERATIONS ===
 
@@ -430,6 +437,39 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         return f"{target_type.value}-policy-{target_name}"
 
+    async def list_all_policies(self) -> List[PolicyModel]:
+        """
+        Retrieve all policies from MinIO as complete PolicyModel objects.
+
+        This method fetches all policies from the MinIO server and loads their
+        complete policy documents including statements, permissions, and conditions.
+        This is useful for administrative operations and policy auditing.
+
+        Returns:
+            List[PolicyModel]: A list of all policies with complete policy documents
+
+        Raises:
+            PolicyOperationError: If listing policies fails
+
+        Note:
+            This operation can be expensive if there are many policies, as it loads
+            the complete policy document for each policy.
+        """
+        try:
+            # Get policy names using generic implementation
+            policy_names = await self.list_resources()
+
+            # Load full PolicyModel objects for each policy
+            policies = []
+            for policy_name in policy_names:
+                policy_model = await self._load_minio_policy(policy_name)
+                if policy_model:
+                    policies.append(policy_model)
+
+            return policies
+        except Exception:
+            raise PolicyOperationError("Failed to list all policies")
+
     # === PRIVATE HELPER METHODS ===
 
     def _build_default_policy(
@@ -455,8 +495,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
             ]
         elif target_type == TargetType.GROUP:
             return [f"{self.config.groups_general_warehouse_prefix}/{target_name}"]
-        else:
-            raise PolicyOperationError(f"Invalid target type: {target_type}")
 
     def _create_policy_statements(
         self, resource_paths: list[str]
@@ -525,6 +563,8 @@ class PolicyManager(ResourceManager[PolicyModel]):
             condition=None,
             principal=None,
         )
+
+    # === MinIO POLICY OPERATIONS ===
 
     async def _create_minio_policy(self, policy_model: PolicyModel) -> None:
         """Create policy in MinIO with retry logic."""

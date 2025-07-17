@@ -5,8 +5,7 @@ import logging
 import os
 from typing import Optional
 
-from src.service.arg_checkers import not_falsy
-
+from ...service.arg_checkers import not_falsy
 from ...service.exceptions import MinIOManagerError
 from ..models.command import CommandResult
 from ..models.minio_config import MinIOConfig
@@ -141,4 +140,3 @@ class BaseMinIOExecutor:
             error_msg = f"Unexpected error executing MC command: {str(e)}"
             logger.error(f"{error_msg} - Command: {command_str}")
             raise MinIOManagerError(error_msg)
-
