@@ -134,21 +134,6 @@ class PolicyBuilder:
 
         return relative_path.rstrip("/")
 
-    def _has_path_access(self, clean_path: str) -> bool:
-        """Check if the policy already grants access to the specified path."""
-        target_resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
-
-        for statement in self.policy_model.policy_document.statement:
-            if statement.effect == PolicyEffect.ALLOW:
-                resources = (
-                    statement.resource
-                    if isinstance(statement.resource, list)
-                    else [statement.resource]
-                )
-                if target_resource in resources:
-                    return True
-        return False
-
     def _find_list_bucket_statement(self) -> PolicyStatement | None:
         """Find the ListBucket statement with prefix conditions."""
         for stmt in self.policy_model.policy_document.statement:
