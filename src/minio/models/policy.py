@@ -12,8 +12,6 @@ class PolicyEffect(str, Enum):
     """Policy effect enumeration."""
 
     ALLOW = "Allow"
-    DENY = "Deny"
-
 
 class PolicyAction(str, Enum):
     """Common MinIO policy actions."""
