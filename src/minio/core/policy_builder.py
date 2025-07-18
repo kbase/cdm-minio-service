@@ -78,6 +78,26 @@ class PolicyBuilder:
         """
         return self.policy_model.model_copy(deep=True)
 
+    def remove_path_access(self, path: str) -> "PolicyBuilder":
+        """
+        Remove all access to a specific path.
+
+        Args:
+            path: The S3 path to revoke access from (e.g., "s3a://bucket/path/to/data")
+
+        Returns:
+            PolicyBuilder: A new builder instance with the path access removed
+
+        Raises:
+            PolicyOperationError: If the path format is invalid
+        """
+        clean_path = self._normalize_path(path)
+
+        # Create new builder with modifications
+        new_builder = PolicyBuilder(self.policy_model, self.bucket_name)
+        new_builder._remove_path_access_internal(clean_path)
+        return new_builder
+
     def _add_path_access_internal(self, path_access: PathAccess) -> None:
         """Internal method to add path access to the policy."""
         # Remove any existing access to allow permission level changes
