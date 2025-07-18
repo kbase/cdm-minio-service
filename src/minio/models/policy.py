@@ -13,6 +13,7 @@ class PolicyEffect(str, Enum):
 
     ALLOW = "Allow"
 
+
 class PolicyAction(str, Enum):
     """Common MinIO policy actions."""
 
@@ -59,7 +60,7 @@ class PolicyStatement(BaseModel):
 
     model_config = ConfigDict(frozen=True)
 
-    effect: Annotated[PolicyEffect, Field(description="Allow or Deny")]
+    effect: Annotated[PolicyEffect, Field(description="Allow only")]
     action: Annotated[
         Union[PolicyAction, List[PolicyAction], str, List[str]],
         Field(description="Actions to allow/deny"),

@@ -240,8 +240,6 @@ class PolicyBuilder:
         self, statement: PolicyStatement, target_resource: str
     ) -> bool:
         """Check if a statement matches a specific resource."""
-        if statement.effect != PolicyEffect.ALLOW:
-            return False
 
         resources = (
             statement.resource
