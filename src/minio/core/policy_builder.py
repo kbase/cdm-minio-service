@@ -69,15 +69,6 @@ class PolicyBuilder:
         new_builder._add_path_access_internal(path_access)
         return new_builder
 
-    def build(self) -> PolicyModel:
-        """
-        Build the final policy model.
-
-        Returns:
-            PolicyModel: A deep copy of the modified policy model
-        """
-        return self.policy_model.model_copy(deep=True)
-
     def remove_path_access(self, path: str) -> "PolicyBuilder":
         """
         Remove all access to a specific path.
@@ -97,6 +88,15 @@ class PolicyBuilder:
         new_builder = PolicyBuilder(self.policy_model, self.bucket_name)
         new_builder._remove_path_access_internal(clean_path)
         return new_builder
+
+    def build(self) -> PolicyModel:
+        """
+        Build the final policy model.
+
+        Returns:
+            PolicyModel: A deep copy of the modified policy model
+        """
+        return self.policy_model.model_copy(deep=True)
 
     def _add_path_access_internal(self, path_access: PathAccess) -> None:
         """Internal method to add path access to the policy."""
