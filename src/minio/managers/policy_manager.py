@@ -663,12 +663,13 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 except StopIteration:
                     actions.append(action)
 
+            if stmt_data.get("Effect") != "Allow":
+                raise PolicyOperationError(
+                    f"Policy {policy_name} has a non-allow effect: {stmt_data.get('Effect')}"
+                )
+
             statement = PolicyStatement(
-                effect=(
-                    PolicyEffect.ALLOW
-                    if stmt_data.get("Effect") == "Allow"
-                    else PolicyEffect.DENY
-                ),
+                effect=PolicyEffect.ALLOW,
                 action=actions,
                 resource=stmt_data.get("Resource", []),
                 condition=stmt_data.get("Condition"),

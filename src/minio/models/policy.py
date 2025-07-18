@@ -4,7 +4,7 @@ import json
 from enum import Enum
 from typing import Any, Dict, List, Optional, Union
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing_extensions import Annotated
 
 
@@ -12,7 +12,6 @@ class PolicyEffect(str, Enum):
     """Policy effect enumeration."""
 
     ALLOW = "Allow"
-    DENY = "Deny"
 
 
 class PolicyAction(str, Enum):
@@ -34,10 +33,34 @@ class PolicyAction(str, Enum):
     ALL_ACTIONS = "s3:*"
 
 
+class PolicyPermissionLevel(str, Enum):
+    """Simplified permission levels."""
+
+    READ = "read"
+    WRITE = "write"
+    ADMIN = "admin"
+
+
+# Permission level to action mappings
+PERMISSION_LEVEL_ACTIONS = {
+    PolicyPermissionLevel.READ: [
+        PolicyAction.GET_OBJECT,
+    ],
+    PolicyPermissionLevel.WRITE: [
+        PolicyAction.GET_OBJECT,
+        PolicyAction.PUT_OBJECT,
+        PolicyAction.DELETE_OBJECT,
+    ],
+    PolicyPermissionLevel.ADMIN: [PolicyAction.ALL_ACTIONS],
+}
+
+
 class PolicyStatement(BaseModel):
     """Individual policy statement."""
 
-    effect: Annotated[PolicyEffect, Field(description="Allow or Deny")]
+    model_config = ConfigDict(frozen=True)
+
+    effect: Annotated[PolicyEffect, Field(description="Allow only")]
     action: Annotated[
         Union[PolicyAction, List[PolicyAction], str, List[str]],
         Field(description="Actions to allow/deny"),
