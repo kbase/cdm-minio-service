@@ -58,9 +58,6 @@ class ErrorType(Enum):
     CONNECTION_ERROR = (20050, "MinIO connection error")
     """ MinIO server connection failed. """
 
-    CONFIGURATION_ERROR = (20060, "MinIO configuration error")
-    """ MinIO configuration is invalid. """
-
     REQUEST_VALIDATION_FAILED = (30010, "Request validation failed")
     """ A request to a service failed validation of the request. """
 
