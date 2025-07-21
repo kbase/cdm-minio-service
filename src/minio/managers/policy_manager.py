@@ -7,6 +7,7 @@ from typing import List
 
 from ...service.exceptions import PolicyOperationError
 from ..core.minio_client import MinIOClient
+from ..core.policy_builder import PolicyBuilder
 from ..models.command import PolicyAction as CommandPolicyAction
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
@@ -14,6 +15,7 @@ from ..models.policy import (
     PolicyDocument,
     PolicyEffect,
     PolicyModel,
+    PolicyPermissionLevel,
     PolicyStatement,
 )
 from ..utils.validators import validate_policy_name
@@ -21,15 +23,6 @@ from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
 
-# MinIO built-in policies
-RESERVED_POLICIES = {
-    "readonly",
-    "readwrite",
-    "writeonly",
-    "diagnostics",
-    "public",
-    "consoleAdmin",
-}
 RESOURCE_TYPE = "policy"
 
 
@@ -357,6 +350,64 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 entities[TargetType.GROUP].extend(groups)
 
         return entities
+
+    # === POLICY DOCUMENT MANIPULATION ===
+
+    def add_path_access_to_policy(
+        self,
+        policy_model: PolicyModel,
+        path: str,
+        permission_level: PolicyPermissionLevel,
+    ) -> PolicyModel:
+        """
+        Add access permissions for a specific path to an existing policy model.
+
+        This method uses the PolicyBuilder pattern to create a new policy model
+        with the added path access. The original policy model is not modified.
+
+        Args:
+            policy_model: The policy model to base modifications on
+            path: The S3 path to grant access to (e.g., "s3a://bucket/path/to/data")
+            permission_level: The level of access to grant (READ, WRITE, or ADMIN)
+
+        Note:
+            This method only modifies the policy model in memory. Call update_policy()
+            to persist the changes to MinIO.
+        """
+        try:
+            builder = PolicyBuilder(policy_model, self.config.default_bucket)
+            return builder.add_path_access(path, permission_level).build()
+        except Exception as e:
+            logger.error(
+                f"Failed to add path access {path} to policy {policy_model.policy_name}: {e}"
+            )
+            raise PolicyOperationError(f"Failed to add path access: {e}") from e
+
+    def remove_path_access_from_policy(
+        self, policy_model: PolicyModel, path: str
+    ) -> PolicyModel:
+        """
+        Remove access permissions for a specific path from an existing policy model.
+
+        This method uses the PolicyBuilder pattern to create a new policy model
+        with the path access removed. The original policy model is not modified.
+
+        Args:
+            policy_model: The policy model to base modifications on
+            path: The S3 path to revoke access from (e.g., "s3a://bucket/path/to/data")
+
+        Note:
+            This method only modifies the policy model in memory. Call update_policy()
+            to persist the changes to MinIO.
+        """
+        try:
+            builder = PolicyBuilder(policy_model, self.config.default_bucket)
+            return builder.remove_path_access(path).build()
+        except Exception as e:
+            logger.error(
+                f"Failed to remove path access {path} from policy {policy_model.policy_name}: {e}"
+            )
+            raise PolicyOperationError(f"Failed to remove path access: {e}") from e
 
     # === POLICY ANALYSIS METHODS ===
 
