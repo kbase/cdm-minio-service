@@ -9,7 +9,7 @@ import logging
 from datetime import datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Body, Depends, Request, status
+from fastapi import APIRouter, Body, Depends, Request, Response, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..minio.utils.validators import validate_s3_path
@@ -87,14 +87,18 @@ class ShareResponse(BaseModel):
 @router.post(
     "/share",
     response_model=ShareResponse,
-    status_code=status.HTTP_200_OK,
     summary="Share data path",
     description="Share an S3 path with specified users and/or groups. Only path owners can share their data.",
+    responses={
+        200: {"description": "All sharing operations succeeded"},
+        207: {"description": "Partial success - some sharing operations failed"},
+    },
 )
 async def share_data(
     share_request: Annotated[ShareRequest, Body(description="Sharing configuration")],
     authenticated_user: Annotated[KBaseUser, Depends(auth)],
     request: Request,
+    response: Response,
 ):
     """Share a data path with specified users or groups."""
     app_state = get_app_state(request)
@@ -109,7 +113,7 @@ async def share_data(
         with_groups=share_request.with_groups,
     )
 
-    response = ShareResponse(
+    share_response = ShareResponse(
         path=share_request.path,
         shared_with_users=result.shared_with_users,
         shared_with_groups=result.shared_with_groups,
@@ -119,9 +123,19 @@ async def share_data(
         shared_at=datetime.now(),
     )
 
-    logger.info(
-        f"User {username} shared {share_request.path} with "
-        f"{len(result.shared_with_users)} users and {len(result.shared_with_groups)} groups"
-    )
+    # Set appropriate status code based on whether there were any errors
+    if result.errors:
+        response.status_code = status.HTTP_207_MULTI_STATUS
+        logger.warning(
+            f"User {username} shared {share_request.path} with partial success: "
+            f"{len(result.shared_with_users)} users and {len(result.shared_with_groups)} groups succeeded, "
+            f"{len(result.errors)} errors occurred"
+        )
+    else:
+        response.status_code = status.HTTP_200_OK
+        logger.info(
+            f"User {username} successfully shared {share_request.path} with "
+            f"{len(result.shared_with_users)} users and {len(result.shared_with_groups)} groups"
+        )
 
-    return response
+    return share_response
