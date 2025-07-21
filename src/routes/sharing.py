@@ -87,7 +87,7 @@ class ShareResponse(BaseModel):
 @router.post(
     "/share",
     response_model=ShareResponse,
-    status_code=status.HTTP_201_CREATED,
+    status_code=status.HTTP_200_OK,
     summary="Share data path",
     description="Share an S3 path with specified users and/or groups. Only path owners can share their data.",
 )
