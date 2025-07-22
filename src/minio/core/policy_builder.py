@@ -4,9 +4,6 @@ Policy Builder module for modifying MinIO policy documents.
 
 import logging
 import re
-from typing import Annotated
-
-from pydantic import BaseModel, ConfigDict, Field
 
 from ...service.exceptions import PolicyOperationError
 from ..models.policy import (
@@ -17,19 +14,9 @@ from ..models.policy import (
     PolicyPermissionLevel,
     PolicyStatement,
 )
+from ..utils.validators import validate_s3_path
 
 logger = logging.getLogger(__name__)
-
-
-class PathAccess(BaseModel):
-    """Represents access to a specific S3 path with permission level."""
-
-    model_config = ConfigDict(frozen=True)
-
-    path: Annotated[str, Field(description="S3 path for access control", min_length=1)]
-    permission_level: Annotated[
-        PolicyPermissionLevel, Field(description="Level of access permission")
-    ]
 
 
 class PolicyBuilder:
@@ -46,7 +33,10 @@ class PolicyBuilder:
         self.bucket_name = bucket_name
 
     def add_path_access(
-        self, path: str, permission_level: PolicyPermissionLevel
+        self,
+        path: str,
+        permission_level: PolicyPermissionLevel,
+        new_policy: bool = False,
     ) -> "PolicyBuilder":
         """
         Add access to a path with specified permission level.
@@ -54,6 +44,7 @@ class PolicyBuilder:
         Args:
             path: The S3 path to grant access to (e.g., "s3a://bucket/path/to/data")
             permission_level: The level of access to grant (READ, WRITE, or ADMIN)
+            new_policy: Whether to create a new policy or modify the existing one
 
         Returns:
             PolicyBuilder: A new builder instance with the path access added
@@ -61,12 +52,18 @@ class PolicyBuilder:
         Raises:
             PolicyOperationError: If the path format is invalid
         """
-        clean_path = self._normalize_path(path)
-        path_access = PathAccess(path=clean_path, permission_level=permission_level)
+        clean_path = self._extract_and_validate_path(path)
 
         # Create new builder with modifications
         new_builder = PolicyBuilder(self.policy_model, self.bucket_name)
-        new_builder._add_path_access_internal(path_access)
+
+        if not new_policy:
+            # Remove any existing access to allow permission level changes
+            new_builder._remove_path_access_internal(clean_path)
+
+        # Re-add path access with new permission level
+        new_builder._add_path_access_internal(clean_path, permission_level)
+
         return new_builder
 
     def remove_path_access(self, path: str) -> "PolicyBuilder":
@@ -82,7 +79,7 @@ class PolicyBuilder:
         Raises:
             PolicyOperationError: If the path format is invalid
         """
-        clean_path = self._normalize_path(path)
+        clean_path = self._extract_and_validate_path(path)
 
         # Create new builder with modifications
         new_builder = PolicyBuilder(self.policy_model, self.bucket_name)
@@ -98,28 +95,33 @@ class PolicyBuilder:
         """
         return self.policy_model.model_copy(deep=True)
 
-    def _add_path_access_internal(self, path_access: PathAccess) -> None:
+    def _add_path_access_internal(
+        self, clean_path: str, permission_level: PolicyPermissionLevel
+    ) -> None:
         """Internal method to add path access to the policy."""
-        # Remove any existing access to allow permission level changes
-        self._remove_path_access_internal(path_access.path)
-
         # Add to ListBucket statement
-        self._add_to_list_bucket_statement(path_access.path)
+        self._add_to_list_bucket_statement(clean_path)
 
         # Add object-level statement
-        self._add_object_statement(path_access.path, path_access.permission_level)
+        self._add_object_statement(clean_path, permission_level)
 
     def _remove_path_access_internal(self, clean_path: str) -> None:
         """Internal method to remove path access from the policy."""
         # Remove from ListBucket statement
         self._remove_from_list_bucket_statement(clean_path)
 
-        # Remove object-level statements
-        self._remove_object_statements(clean_path)
+        # Remove object-level statements (automatically handles both folder and folder/* ARNs)
+        folder_arn = f"arn:aws:s3:::{self.bucket_name}/{clean_path}"
+        self._remove_object_statements(folder_arn)
 
-    def _normalize_path(self, path: str) -> str:
+    def _extract_and_validate_path(self, path: str) -> str:
         """
         Normalize S3 path to bucket-relative format.
+
+        Handles both folder and folder/* input formats consistently:
+        - 's3a://bucket/path/to/folder' → 'path/to/folder'
+        - 's3a://bucket/path/to/folder/*' → 'path/to/folder'
+        - 's3a://bucket/path/to/folder/' → 'path/to/folder'
 
         Args:
             path: The S3 path to normalize
@@ -130,12 +132,9 @@ class PolicyBuilder:
         Raises:
             PolicyOperationError: If the path format is invalid
         """
-        if not path.startswith(("s3://", "s3a://")):
-            raise PolicyOperationError(
-                f"Invalid S3 path format: {path}. Must start with s3:// or s3a://"
-            )
+        path = validate_s3_path(path)
 
-        # Extract bucket and path from S3 URL
+        # Extract bucket and path from validated S3 URL
         path_without_scheme = re.sub(r"^s3a?://", "", path)
         path_parts = path_without_scheme.split("/", 1)
 
@@ -144,15 +143,21 @@ class PolicyBuilder:
                 f"S3 path must include a path component after bucket: {path}"
             )
 
-        bucket_in_path, relative_path = path_parts
+        bucket_name, relative_path = path_parts
 
         # Validate bucket matches configuration
-        if bucket_in_path != self.bucket_name:
+        if bucket_name != self.bucket_name:
             raise PolicyOperationError(
-                f"Path bucket '{bucket_in_path}' does not match configured bucket '{self.bucket_name}'"
+                f"Path bucket '{bucket_name}' does not match configured bucket '{self.bucket_name}'"
             )
 
-        return relative_path.rstrip("/")
+        # Normalize path (remove trailing slashes and /* patterns for consistent handling)
+        normalized_path = relative_path.rstrip("/").removesuffix("/*")
+
+        if not normalized_path:
+            raise PolicyOperationError("Path cannot be empty after bucket name")
+
+        return normalized_path
 
     def _find_list_bucket_statement(self) -> PolicyStatement | None:
         """Find the ListBucket statement with prefix conditions."""
@@ -164,6 +169,7 @@ class PolicyBuilder:
                 and "StringLike" in stmt.condition
                 and "s3:prefix" in stmt.condition["StringLike"]
             ):
+                # There should only be one ListBucket statement
                 return stmt
         return None
 
@@ -174,7 +180,7 @@ class PolicyBuilder:
             raise PolicyOperationError("No ListBucket statement found to add path to")
 
         prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
-        new_prefixes = [f"{clean_path}/*", clean_path]
+        new_prefixes = self._create_list_bucket_prefixes(clean_path)
 
         for prefix in new_prefixes:
             if prefix not in prefixes:
@@ -187,7 +193,7 @@ class PolicyBuilder:
             raise PolicyOperationError("No ListBucket statement found to add path to")
 
         prefixes = list_bucket_stmt.condition["StringLike"]["s3:prefix"]
-        prefixes_to_remove = {f"{clean_path}/*", clean_path}
+        prefixes_to_remove = self._create_list_bucket_prefixes(clean_path)
 
         list_bucket_stmt.condition["StringLike"]["s3:prefix"] = [
             prefix for prefix in prefixes if prefix not in prefixes_to_remove
@@ -210,26 +216,40 @@ class PolicyBuilder:
 
         self.policy_model.policy_document.statement.append(new_statement)
 
-    def _remove_object_statements(self, clean_path: str) -> None:
-        """Remove object-level statements that match the path."""
-        target_resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
+    def _remove_object_statements(self, target_resource: str) -> None:
+        """
+        Remove object-level statements that match the resource ARN.
+
+        Automatically removes both folder and folder/* patterns.
+        Since paths are normalized, target_resource is always a folder ARN (without /*).
+        """
+        # Always remove both folder and folder/* patterns for complete cleanup
+        resources_to_remove = [target_resource, f"{target_resource}/*"]
 
         statements_to_keep = []
 
         for stmt in self.policy_model.policy_document.statement:
-            if not self._statement_matches_resource(stmt, target_resource):
-                # Statement doesn't contain target resource, keep as-is
+            # Check if statement contains any of the resources we want to remove
+            contains_target = any(
+                self._statement_matches_resource(stmt, resource)
+                for resource in resources_to_remove
+            )
+
+            if not contains_target:
+                # Statement doesn't contain any target resources, keep as-is
                 statements_to_keep.append(stmt)
             else:
-                # Statement contains target resource
+                # Statement contains target resources
                 resources = (
                     stmt.resource
                     if isinstance(stmt.resource, list)
                     else [stmt.resource]
                 )
 
-                # Remove only the target resource
-                remaining_resources = [r for r in resources if r != target_resource]
+                # Remove all target resources
+                remaining_resources = [
+                    r for r in resources if r not in resources_to_remove
+                ]
 
                 # Only keep statement if it has remaining resources
                 if remaining_resources:
@@ -252,3 +272,7 @@ class PolicyBuilder:
             else [statement.resource]
         )
         return target_resource in resources
+
+    def _create_list_bucket_prefixes(self, normalized_path: str) -> list[str]:
+        """Create list of prefixes for ListBucket operations."""
+        return [normalized_path, f"{normalized_path}/*"]
