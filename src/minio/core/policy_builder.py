@@ -7,7 +7,6 @@ import re
 
 from ...service.exceptions import PolicyOperationError
 from ..models.policy import (
-    PERMISSION_LEVEL_ACTIONS,
     PolicyAction,
     PolicyEffect,
     PolicyModel,
@@ -99,11 +98,17 @@ class PolicyBuilder:
         self, clean_path: str, permission_level: PolicyPermissionLevel
     ) -> None:
         """Internal method to add path access to the policy."""
-        # Add to ListBucket statement
-        self._add_to_list_bucket_statement(clean_path)
 
-        # Add object-level statement
-        self._add_object_statement(clean_path, permission_level)
+        # Add bucket access permissions
+        self._add_bucket_access_permissions(self.bucket_name)
+
+        # Add ListBucket permissions with prefixes
+        self._add_list_bucket_permissions(self.bucket_name, clean_path)
+
+        # Add object-level permissions based on permission level
+        self._add_object_level_permissions(
+            self.bucket_name, clean_path, permission_level
+        )
 
     def _remove_path_access_internal(self, clean_path: str) -> None:
         """Internal method to remove path access from the policy."""
@@ -199,23 +204,6 @@ class PolicyBuilder:
             prefix for prefix in prefixes if prefix not in prefixes_to_remove
         ]
 
-    def _add_object_statement(
-        self, clean_path: str, permission_level: PolicyPermissionLevel
-    ) -> None:
-        """Add object-level permissions statement."""
-        actions = PERMISSION_LEVEL_ACTIONS[permission_level]
-        resource = f"arn:aws:s3:::{self.bucket_name}/{clean_path}/*"
-
-        new_statement = PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=actions,
-            resource=[resource],
-            condition=None,
-            principal=None,
-        )
-
-        self.policy_model.policy_document.statement.append(new_statement)
-
     def _remove_object_statements(self, target_resource: str) -> None:
         """
         Remove object-level statements that match the resource ARN.
@@ -272,6 +260,120 @@ class PolicyBuilder:
             else [statement.resource]
         )
         return target_resource in resources
+
+    def _add_bucket_access_permissions(self, bucket_name: str) -> None:
+        """Add bucket access permissions (GetBucketLocation)."""
+        # Check if GetBucketLocation already exists for this bucket
+        bucket_resource = f"arn:aws:s3:::{bucket_name}"
+        for stmt in self.policy_model.policy_document.statement:
+            if PolicyAction.GET_BUCKET_LOCATION in (
+                stmt.action if isinstance(stmt.action, list) else [stmt.action]
+            ) and bucket_resource in (
+                stmt.resource if isinstance(stmt.resource, list) else [stmt.resource]
+            ):
+                return  # Already exists
+
+        # Add GetBucketLocation statement
+        bucket_location_stmt = PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=[PolicyAction.GET_BUCKET_LOCATION],
+            resource=[bucket_resource],
+            condition=None,
+            principal=None,
+        )
+        self.policy_model.policy_document.statement.append(bucket_location_stmt)
+
+    def _add_list_bucket_permissions(self, bucket_name: str, clean_path: str) -> None:
+        """Add ListBucket permissions with proper prefixes."""
+        prefixes_to_add = self._create_list_bucket_prefixes(clean_path)
+        bucket_resource = f"arn:aws:s3:::{bucket_name}"
+
+        # Find existing ListBucket statement for this bucket
+        existing_stmt = None
+        for stmt in self.policy_model.policy_document.statement:
+            if PolicyAction.LIST_BUCKET in (
+                stmt.action if isinstance(stmt.action, list) else [stmt.action]
+            ) and bucket_resource in (
+                stmt.resource if isinstance(stmt.resource, list) else [stmt.resource]
+            ):
+                existing_stmt = stmt
+                break
+
+        if (
+            existing_stmt
+            and existing_stmt.condition
+            and "StringLike" in existing_stmt.condition
+        ):
+            # Add to existing prefixes
+            current_prefixes = existing_stmt.condition["StringLike"]["s3:prefix"]
+            for prefix in prefixes_to_add:
+                if prefix not in current_prefixes:
+                    current_prefixes.append(prefix)
+        else:
+            # Create new ListBucket statement
+            new_stmt = PolicyStatement(
+                effect=PolicyEffect.ALLOW,
+                action=[PolicyAction.LIST_BUCKET],
+                resource=[bucket_resource],
+                condition={"StringLike": {"s3:prefix": prefixes_to_add.copy()}},
+                principal=None,
+            )
+            self.policy_model.policy_document.statement.append(new_stmt)
+
+    def _add_object_level_permissions(
+        self, bucket_name: str, clean_path: str, permission_level: PolicyPermissionLevel
+    ) -> None:
+        """Add object-level permissions based on permission level."""
+        # Create both folder and folder/* ARNs for comprehensive access
+        folder_arn = f"arn:aws:s3:::{bucket_name}/{clean_path}"
+        folder_contents_arn = f"arn:aws:s3:::{bucket_name}/{clean_path}/*"
+
+        # Add permissions based on level
+        if permission_level in [
+            PolicyPermissionLevel.READ,
+            PolicyPermissionLevel.WRITE,
+            PolicyPermissionLevel.ADMIN,
+        ]:
+            # For GET operations, need both folder and folder/* for listing and reading
+            self._add_object_permission(folder_arn, PolicyAction.GET_OBJECT)
+            self._add_object_permission(folder_contents_arn, PolicyAction.GET_OBJECT)
+
+        if permission_level in [
+            PolicyPermissionLevel.WRITE,
+            PolicyPermissionLevel.ADMIN,
+        ]:
+            # For PUT operations, need both folder and folder/* for creating folders and files
+            self._add_object_permission(folder_arn, PolicyAction.PUT_OBJECT)
+            self._add_object_permission(folder_contents_arn, PolicyAction.PUT_OBJECT)
+
+            # For DELETE operations, only need folder/* to delete contents
+            self._add_object_permission(folder_contents_arn, PolicyAction.DELETE_OBJECT)
+
+    def _add_object_permission(self, resource_arn: str, action: PolicyAction) -> None:
+        """Add a specific object permission."""
+        # Check if we already have a statement with this action and resource
+        for stmt in self.policy_model.policy_document.statement:
+            if action in (
+                stmt.action if isinstance(stmt.action, list) else [stmt.action]
+            ):
+                resources = (
+                    stmt.resource
+                    if isinstance(stmt.resource, list)
+                    else [stmt.resource]
+                )
+                if resource_arn not in resources:
+                    resources.append(resource_arn)
+                return
+
+        # Create new statement for this action
+        new_stmt = PolicyStatement(
+            effect=PolicyEffect.ALLOW,
+            action=[action],
+            resource=[resource_arn],
+            condition=None,
+            principal=None,
+        )
+        self.policy_model.policy_document.statement.append(new_stmt)
 
     def _create_list_bucket_prefixes(self, normalized_path: str) -> list[str]:
         """Create list of prefixes for ListBucket operations."""
