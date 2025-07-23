@@ -33,6 +33,7 @@ POLICY TYPES CREATED:
 """
 
 import logging
+from collections import defaultdict
 from typing import Dict, List
 
 from ..models.minio_config import MinIOConfig
@@ -120,7 +121,7 @@ class PolicyCreator:
         self, username: str
     ) -> Dict[str, List[tuple[str, PolicyPermissionLevel]]]:
         """Get system resource paths and permission levels for a user using the global configuration."""
-        user_paths = {}
+        user_paths = defaultdict(list)
 
         for resource_config in self.system_config.values():
             bucket = resource_config["bucket"]
@@ -136,10 +137,6 @@ class PolicyCreator:
                 path = base_prefix
 
             path_with_permission = (path, permission_level)
-
-            if bucket in user_paths:
-                user_paths[bucket].append(path_with_permission)
-            else:
-                user_paths[bucket] = [path_with_permission]
+            user_paths[bucket].append(path_with_permission)
 
         return user_paths
