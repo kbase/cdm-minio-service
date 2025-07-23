@@ -52,6 +52,16 @@ from .policy_builder import PolicyBuilder
 
 logger = logging.getLogger(__name__)
 
+# Mapping from policy actions to their corresponding sections
+_POLICY_ACTION_TO_POLICY_SECTION = {
+    PolicyAction.LIST_ALL_MY_BUCKETS: PolicySectionType.GLOBAL_PERMISSIONS,
+    PolicyAction.GET_BUCKET_LOCATION: PolicySectionType.GLOBAL_PERMISSIONS,
+    PolicyAction.LIST_BUCKET: PolicySectionType.BUCKET_ACCESS,
+    PolicyAction.GET_OBJECT: PolicySectionType.READ_PERMISSIONS,
+    PolicyAction.PUT_OBJECT: PolicySectionType.WRITE_PERMISSIONS,
+    PolicyAction.DELETE_OBJECT: PolicySectionType.DELETE_PERMISSIONS,
+}
+
 # Global system resource configuration
 SYSTEM_RESOURCE_CONFIG = {
     # Spark-logs-related resources
@@ -259,32 +269,19 @@ class PolicyCreator:
 
         # Categorize statements back into sections
         for stmt in policy.policy_document.statement:
-            if PolicyAction.LIST_ALL_MY_BUCKETS in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
-                self._sections[PolicySectionType.GLOBAL_PERMISSIONS].append(stmt)
-            elif PolicyAction.GET_BUCKET_LOCATION in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
-                self._sections[PolicySectionType.GLOBAL_PERMISSIONS].append(stmt)
-            elif PolicyAction.LIST_BUCKET in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
-                self._sections[PolicySectionType.BUCKET_ACCESS].append(stmt)
-            elif PolicyAction.GET_OBJECT in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
-                self._sections[PolicySectionType.READ_PERMISSIONS].append(stmt)
-            elif PolicyAction.PUT_OBJECT in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
-                self._sections[PolicySectionType.WRITE_PERMISSIONS].append(stmt)
-            elif PolicyAction.DELETE_OBJECT in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
-                self._sections[PolicySectionType.DELETE_PERMISSIONS].append(stmt)
+            # Each statement should have exactly one action
+            action = stmt.action
+            if isinstance(action, list):
+                if len(action) != 1:
+                    raise PolicyOperationError(f"Statement must have exactly one action, got: {action}")
+                action = action[0]
+
+            # Find the section for this action
+            if action in _POLICY_ACTION_TO_POLICY_SECTION:
+                target_section = _POLICY_ACTION_TO_POLICY_SECTION[action]
+                self._sections[target_section].append(stmt)
             else:
-                raise PolicyOperationError(f"Unsupported policy action: {stmt.action}")
+                raise PolicyOperationError(f"Unsupported policy action: {action}")
 
     def _get_user_system_paths(
         self, username: str
