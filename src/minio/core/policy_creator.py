@@ -269,12 +269,8 @@ class PolicyCreator:
 
         # Categorize statements back into sections
         for stmt in policy.policy_document.statement:
-            # Each statement should have exactly one action
+            # Each statement now has exactly one action (enforced by type)
             action = stmt.action
-            if isinstance(action, list):
-                if len(action) != 1:
-                    raise PolicyOperationError(f"Statement must have exactly one action, got: {action}")
-                action = action[0]
 
             # Find the section for this action
             if action in _POLICY_ACTION_TO_POLICY_SECTION:

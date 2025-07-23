@@ -562,7 +562,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Create statement for listing all buckets (required for MinIO users to see buckets in the UI)."""
         return PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            action=[PolicyAction.LIST_ALL_MY_BUCKETS],
+            action=PolicyAction.LIST_ALL_MY_BUCKETS,
             resource=["*"],
             condition=None,
             principal=None,
@@ -572,7 +572,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Create statement for getting bucket location (required for MinIO users to see buckets in the UI)."""
         return PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            action=[PolicyAction.GET_BUCKET_LOCATION],
+            action=PolicyAction.GET_BUCKET_LOCATION,
             resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
             condition=None,
             principal=None,
@@ -588,7 +588,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
         return PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            action=[PolicyAction.LIST_BUCKET],
+            action=PolicyAction.LIST_BUCKET,
             resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
             condition={"StringLike": {"s3:prefix": prefix_conditions}},
             principal=None,
@@ -605,11 +605,8 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
         return PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            action=[
-                PolicyAction.GET_OBJECT,
-                PolicyAction.PUT_OBJECT,
-                PolicyAction.DELETE_OBJECT,
-            ],
+            # TODO: This will be reactored in the future PRs
+            action=PolicyAction.GET_OBJECT,
             resource=object_resources,
             condition=None,
             principal=None,
@@ -702,31 +699,37 @@ class PolicyManager(ResourceManager[PolicyModel]):
         # Create PolicyDocument from the policy JSON
         statements = []
         for stmt_data in policy_json.get("Statement", []):
-            actions = []
-            for action in stmt_data.get("Action", []):
-                try:
-                    matching_action = next(
-                        policy_action
-                        for policy_action in PolicyAction
-                        if policy_action.value == action
-                    )
-                    actions.append(matching_action)
-                except StopIteration:
-                    actions.append(action)
-
             if stmt_data.get("Effect") != "Allow":
                 raise PolicyOperationError(
                     f"Policy {policy_name} has a non-allow effect: {stmt_data.get('Effect')}"
                 )
 
-            statement = PolicyStatement(
-                effect=PolicyEffect.ALLOW,
-                action=actions,
-                resource=stmt_data.get("Resource", []),
-                condition=stmt_data.get("Condition"),
-                principal=stmt_data.get("Principal"),
-            )
-            statements.append(statement)
+            # Parse actions and create separate statements for each action
+            raw_actions = stmt_data.get("Action", [])
+            if isinstance(raw_actions, str):
+                raw_actions = [raw_actions]
+
+            for action in raw_actions:
+                try:
+                    parsed_action = next(
+                        policy_action
+                        for policy_action in PolicyAction
+                        if policy_action.value == action
+                    )
+                except StopIteration:
+                    raise PolicyOperationError(
+                        f"Unsupported action '{action}' in policy {policy_name}"
+                    )
+
+                # Create a separate statement for each action
+                statement = PolicyStatement(
+                    effect=PolicyEffect.ALLOW,
+                    action=parsed_action,
+                    resource=stmt_data.get("Resource", []),
+                    condition=stmt_data.get("Condition"),
+                    principal=stmt_data.get("Principal"),
+                )
+                statements.append(statement)
 
         policy_document = PolicyDocument(statement=statements)
 
