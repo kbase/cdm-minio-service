@@ -605,7 +605,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
         return PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            # TODO: This will be reactored in the future PRs
+            # TODO: This will be refactored with future PRs - PolicyStatement allows only 1 action now
             action=PolicyAction.GET_OBJECT,
             resource=object_resources,
             condition=None,
