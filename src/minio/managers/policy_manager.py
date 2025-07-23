@@ -697,29 +697,10 @@ class PolicyManager(ResourceManager[PolicyModel]):
         policy_json = policy_data.get("Policy", policy_data)
 
         # Create PolicyDocument from the policy JSON
-        statements = []
-        for stmt_data in policy_json.get("Statement", []):
-            if stmt_data.get("Effect") != "Allow":
-                raise PolicyOperationError(
-                    f"Policy {policy_name} has a non-allow effect: {stmt_data.get('Effect')}"
-                )
-            
-            try:
-                statement = PolicyStatement.from_dict(
-                    {
-                        "Effect": "Allow",
-                        "Action": stmt_data.get("Action", []),
-                        "Resource": stmt_data.get("Resource", []),
-                        "Condition": stmt_data.get("Condition"),
-                        "Principal": stmt_data.get("Principal"),
-                    }
-                )
-            except ValueError as e:
-                raise PolicyOperationError(f"Policy {policy_name}: {e}")
-
-            statements.append(statement)
-
-        policy_document = PolicyDocument(statement=statements)
+        try:
+            policy_document = PolicyDocument.from_dict(policy_json)
+        except ValueError as e:
+            raise PolicyOperationError(f"Policy {policy_name}: {e}")
 
         return PolicyModel(
             policy_name=policy_name,
