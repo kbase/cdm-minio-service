@@ -36,8 +36,7 @@ import logging
 from collections import defaultdict
 from typing import Dict, List
 
-from service.exceptions import PolicyOperationError
-
+from ...service.exceptions import PolicyOperationError
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
     PolicyDocument,
