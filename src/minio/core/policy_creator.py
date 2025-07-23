@@ -122,13 +122,11 @@ class PolicyCreator:
         """Get system resource paths and permission levels for a user using the global configuration."""
         user_paths = {}
 
-        for _, resource_config in self.system_config.items():
+        for resource_config in self.system_config.values():
             bucket = resource_config["bucket"]
             base_prefix = resource_config["base_prefix"]
-            user_scoped = resource_config.get("user_scoped", True)
-            permission_level = resource_config.get(
-                "permission_level", PolicyPermissionLevel.WRITE
-            )
+            user_scoped = resource_config["user_scoped"]
+            permission_level = resource_config["permission_level"]
 
             if user_scoped:
                 # User-specific resource path
