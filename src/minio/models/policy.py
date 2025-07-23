@@ -41,6 +41,48 @@ class PolicyPermissionLevel(str, Enum):
     ADMIN = "admin"
 
 
+class PolicyTarget(str, Enum):
+    """Target types for policy operations."""
+
+    USER = "user"
+    GROUP = "group"
+
+
+class PolicyType(str, Enum):
+    """Types of policies in the system."""
+
+    USER_HOME = "user_home"
+    USER_SYSTEM = "user_system"
+    GROUP_HOME = "group_home"
+
+
+class PolicySectionType(str, Enum):
+    """Policy sections for organized statement management."""
+
+    # Administrative permissions that apply across all resources
+    GLOBAL_PERMISSIONS = (
+        "global_permissions"  # ListAllMyBuckets, GetBucketLocation - system-wide access
+    )
+
+    # Basic bucket listing and discovery permissions
+    BUCKET_ACCESS = "bucket_access"  # ListBucket permissions for specific buckets - allows seeing bucket contents
+
+    # Object retrieval permissions
+    READ_PERMISSIONS = (
+        "read_permissions"  # GetObject permissions - allows downloading/reading files
+    )
+
+    # Object creation and modification permissions
+    WRITE_PERMISSIONS = (
+        "write_permissions"  # PutObject permissions - allows uploading/creating files
+    )
+
+    # Object removal permissions
+    DELETE_PERMISSIONS = (
+        "delete_permissions"  # DeleteObject permissions - allows removing files
+    )
+
+
 # Permission level to action mappings
 PERMISSION_LEVEL_ACTIONS = {
     PolicyPermissionLevel.READ: [
