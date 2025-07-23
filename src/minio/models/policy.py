@@ -150,8 +150,6 @@ class PolicyDocument(BaseModel):
             raw_actions = stmt_dict["Action"]
             if isinstance(raw_actions, str):
                 raw_actions = [raw_actions]
-            elif not isinstance(raw_actions, list):
-                raw_actions = [raw_actions]
 
             for action in raw_actions:
                 # Convert string action to PolicyAction enum
