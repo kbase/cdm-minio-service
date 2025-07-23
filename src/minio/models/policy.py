@@ -104,8 +104,8 @@ class PolicyStatement(BaseModel):
 
     effect: Annotated[PolicyEffect, Field(description="Allow only")]
     action: Annotated[
-        Union[PolicyAction, List[PolicyAction], str, List[str]],
-        Field(description="Actions to allow/deny"),
+        PolicyAction,
+        Field(description="Action to allow/deny"),
     ]
     resource: Annotated[Union[str, List[str]], Field(description="Resources affected")]
     condition: Annotated[
@@ -115,6 +115,31 @@ class PolicyStatement(BaseModel):
         Optional[Union[str, List[str]]],
         Field(default=None, description="Principal (for resource policies)"),
     ]
+
+    @classmethod
+    def from_dict(cls, stmt_dict: Dict[str, Any]) -> "PolicyStatement":
+        """Create PolicyStatement from dictionary with single-action enforcement."""
+        raw_actions = stmt_dict["Action"]
+        if isinstance(raw_actions, str):
+            raw_actions = [raw_actions]
+
+        if len(raw_actions) > 1:
+            raise ValueError(f"Policy has multiple actions: {raw_actions}")
+
+        action = raw_actions[0]
+
+        try:
+            policy_action = PolicyAction(action)
+        except ValueError:
+            raise ValueError(f"Unsupported policy action: {action}")
+
+        return cls(
+            effect=PolicyEffect(stmt_dict["Effect"]),
+            action=policy_action,
+            resource=stmt_dict["Resource"],
+            condition=stmt_dict.get("Condition"),
+            principal=stmt_dict.get("Principal"),
+        )
 
 
 class PolicyDocument(BaseModel):
@@ -146,15 +171,7 @@ class PolicyDocument(BaseModel):
         """Create from dictionary."""
         statements = []
         for stmt_dict in policy_dict.get("Statement", []):
-            statements.append(
-                PolicyStatement(
-                    effect=PolicyEffect(stmt_dict["Effect"]),
-                    action=stmt_dict["Action"],
-                    resource=stmt_dict["Resource"],
-                    condition=stmt_dict.get("Condition"),
-                    principal=stmt_dict.get("Principal"),
-                )
-            )
+            statements.append(PolicyStatement.from_dict(stmt_dict))
 
         return cls(
             version=policy_dict.get("Version", "2012-10-17"), statement=statements

@@ -39,6 +39,7 @@ from typing import Dict, List
 from ...service.exceptions import PolicyOperationError
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
+    PolicyAction,
     PolicyDocument,
     PolicyModel,
     PolicyPermissionLevel,
@@ -47,8 +48,19 @@ from ..models.policy import (
     PolicyType,
 )
 from ..utils.validators import validate_policy_name
+from .policy_builder import PolicyBuilder
 
 logger = logging.getLogger(__name__)
+
+# Mapping from policy actions to their corresponding sections
+_POLICY_ACTION_TO_POLICY_SECTION = {
+    PolicyAction.LIST_ALL_MY_BUCKETS: PolicySectionType.GLOBAL_PERMISSIONS,
+    PolicyAction.GET_BUCKET_LOCATION: PolicySectionType.GLOBAL_PERMISSIONS,
+    PolicyAction.LIST_BUCKET: PolicySectionType.BUCKET_ACCESS,
+    PolicyAction.GET_OBJECT: PolicySectionType.READ_PERMISSIONS,
+    PolicyAction.PUT_OBJECT: PolicySectionType.WRITE_PERMISSIONS,
+    PolicyAction.DELETE_OBJECT: PolicySectionType.DELETE_PERMISSIONS,
+}
 
 # Global system resource configuration
 SYSTEM_RESOURCE_CONFIG = {
@@ -221,6 +233,51 @@ class PolicyCreator:
             return validate_policy_name(policy_name)
         except Exception as e:
             raise PolicyOperationError(f"Generated policy name is invalid: {e}") from e
+
+    def _add_path_access_via_builder(
+        self, bucket_name: str, path: str, permission_level: PolicyPermissionLevel
+    ) -> None:
+        """
+        Add path access using PolicyBuilder and update internal sections.
+
+        Args:
+            path: The S3 path to grant access to
+            permission_level: The level of access to grant
+        """
+        # Get current policy state
+        current_policy = self._get_current_policy()
+
+        # Use PolicyBuilder to add the path access
+        builder = PolicyBuilder(current_policy, bucket_name)
+        updated_policy = builder.add_path_access(
+            path, permission_level, new_policy=True
+        ).build()
+
+        # Clear current sections and rebuild from updated policy
+        self._rebuild_sections_from_policy(updated_policy)
+
+    def _rebuild_sections_from_policy(self, policy: PolicyModel) -> None:
+        """
+        Rebuild internal sections from a policy model.
+
+        Args:
+            policy: Policy model to extract sections from
+        """
+        # Clear existing sections
+        for section_type in self._sections:
+            self._sections[section_type] = []
+
+        # Categorize statements back into sections
+        for stmt in policy.policy_document.statement:
+            # Each statement now has exactly one action (enforced by type)
+            action = stmt.action
+
+            # Find the section for this action
+            if action in _POLICY_ACTION_TO_POLICY_SECTION:
+                target_section = _POLICY_ACTION_TO_POLICY_SECTION[action]
+                self._sections[target_section].append(stmt)
+            else:
+                raise PolicyOperationError(f"Unsupported policy action: {action}")
 
     def _get_user_system_paths(
         self, username: str

@@ -168,8 +168,7 @@ class PolicyBuilder:
         """Find the ListBucket statement with prefix conditions."""
         for stmt in self.policy_model.policy_document.statement:
             if (
-                PolicyAction.LIST_BUCKET
-                in (stmt.action if isinstance(stmt.action, list) else [stmt.action])
+                stmt.action == PolicyAction.LIST_BUCKET
                 and stmt.condition
                 and "StringLike" in stmt.condition
                 and "s3:prefix" in stmt.condition["StringLike"]
@@ -266,9 +265,7 @@ class PolicyBuilder:
         # Check if GetBucketLocation already exists for this bucket
         bucket_resource = f"arn:aws:s3:::{bucket_name}"
         for stmt in self.policy_model.policy_document.statement:
-            if PolicyAction.GET_BUCKET_LOCATION in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ) and bucket_resource in (
+            if stmt.action == PolicyAction.GET_BUCKET_LOCATION and bucket_resource in (
                 stmt.resource if isinstance(stmt.resource, list) else [stmt.resource]
             ):
                 return  # Already exists
@@ -276,7 +273,7 @@ class PolicyBuilder:
         # Add GetBucketLocation statement
         bucket_location_stmt = PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            action=[PolicyAction.GET_BUCKET_LOCATION],
+            action=PolicyAction.GET_BUCKET_LOCATION,
             resource=[bucket_resource],
             condition=None,
             principal=None,
@@ -291,9 +288,7 @@ class PolicyBuilder:
         # Find existing ListBucket statement for this bucket
         existing_stmt = None
         for stmt in self.policy_model.policy_document.statement:
-            if PolicyAction.LIST_BUCKET in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ) and bucket_resource in (
+            if stmt.action == PolicyAction.LIST_BUCKET and bucket_resource in (
                 stmt.resource if isinstance(stmt.resource, list) else [stmt.resource]
             ):
                 existing_stmt = stmt
@@ -313,7 +308,7 @@ class PolicyBuilder:
             # Create new ListBucket statement
             new_stmt = PolicyStatement(
                 effect=PolicyEffect.ALLOW,
-                action=[PolicyAction.LIST_BUCKET],
+                action=PolicyAction.LIST_BUCKET,
                 resource=[bucket_resource],
                 condition={"StringLike": {"s3:prefix": prefixes_to_add.copy()}},
                 principal=None,
@@ -353,9 +348,7 @@ class PolicyBuilder:
         """Add a specific object permission."""
         # Check if we already have a statement with this action and resource
         for stmt in self.policy_model.policy_document.statement:
-            if action in (
-                stmt.action if isinstance(stmt.action, list) else [stmt.action]
-            ):
+            if stmt.action == action:
                 resources = (
                     stmt.resource
                     if isinstance(stmt.resource, list)
@@ -368,7 +361,7 @@ class PolicyBuilder:
         # Create new statement for this action
         new_stmt = PolicyStatement(
             effect=PolicyEffect.ALLOW,
-            action=[action],
+            action=action,
             resource=[resource_arn],
             condition=None,
             principal=None,
