@@ -36,13 +36,17 @@ import logging
 from collections import defaultdict
 from typing import Dict, List
 
+from ...service.exceptions import PolicyOperationError
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
+    PolicyDocument,
+    PolicyModel,
     PolicyPermissionLevel,
     PolicySectionType,
     PolicyStatement,
     PolicyType,
 )
+from ..utils.validators import validate_policy_name
 
 logger = logging.getLogger(__name__)
 
@@ -116,6 +120,107 @@ class PolicyCreator:
             PolicySectionType.WRITE_PERMISSIONS: [],
             PolicySectionType.DELETE_PERMISSIONS: [],
         }
+
+    def _get_current_policy(self) -> PolicyModel:
+        """
+        Get the current policy model from sections.
+        Used internally to work with PolicyBuilder.
+
+        Returns:
+            PolicyModel: Current policy constructed from sections
+        """
+        all_statements = self._combine_sections_with_ordering()
+
+        policy_document = PolicyDocument(statement=all_statements)
+        policy_name = self._generate_policy_name()
+
+        return PolicyModel(
+            policy_name=policy_name,
+            policy_document=policy_document,
+        )
+
+    def build(self) -> PolicyModel:
+        """
+        Build the final policy model from all sections.
+
+        Returns:
+            PolicyModel with the constructed policy
+
+        Raises:
+            PolicyOperationError: If policy cannot be built or validation fails
+        """
+        try:
+            # Combine all sections into a single statement list with proper ordering
+            all_statements = self._combine_sections_with_ordering()
+
+            # Create policy document
+            policy_document = PolicyDocument(statement=all_statements)
+
+            # Generate policy name
+            policy_name = self._generate_policy_name()
+
+            # Create and return policy model
+            return PolicyModel(
+                policy_name=policy_name,
+                policy_document=policy_document,
+            )
+
+        except Exception as e:
+            logger.error(
+                f"Failed to build policy for {self.policy_type.value} '{self.target_name}': {e}"
+            )
+            raise PolicyOperationError(f"Policy build failed: {e}") from e
+
+    def _combine_sections_with_ordering(self) -> List[PolicyStatement]:
+        """
+        Combine all sections into a single statement list with proper ordering.
+        Order: Global -> Bucket Access -> Read -> Write -> Delete
+
+        Returns:
+            List of all policy statements in proper order
+        """
+        all_statements = []
+
+        # Add statements in the specified order for better organization
+        section_order = [
+            PolicySectionType.GLOBAL_PERMISSIONS,
+            PolicySectionType.BUCKET_ACCESS,
+            PolicySectionType.READ_PERMISSIONS,
+            PolicySectionType.WRITE_PERMISSIONS,
+            PolicySectionType.DELETE_PERMISSIONS,
+        ]
+
+        for section_type in section_order:
+            statements = self._sections[section_type]
+            if statements:
+                all_statements.extend(statements)
+
+        return all_statements
+
+    def _generate_policy_name(self) -> str:
+        """
+        Generate policy name based on policy type and target name using proper validation.
+
+        Returns:
+            Generated policy name following naming conventions
+
+        Raises:
+            PolicyOperationError: If generated policy name is invalid
+        """
+        if self.policy_type == PolicyType.USER_HOME:
+            policy_name = f"user-home-policy-{self.target_name}"
+        elif self.policy_type == PolicyType.USER_SYSTEM:
+            policy_name = f"user-system-policy-{self.target_name}"
+        elif self.policy_type == PolicyType.GROUP_HOME:
+            policy_name = f"group-policy-{self.target_name}"
+        else:
+            raise PolicyOperationError(f"Unknown policy type: {self.policy_type}")
+
+        # Validate the generated policy name
+        try:
+            return validate_policy_name(policy_name)
+        except Exception as e:
+            raise PolicyOperationError(f"Generated policy name is invalid: {e}") from e
 
     def _get_user_system_paths(
         self, username: str
