@@ -703,33 +703,21 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 raise PolicyOperationError(
                     f"Policy {policy_name} has a non-allow effect: {stmt_data.get('Effect')}"
                 )
-
-            # Parse actions and create separate statements for each action
-            raw_actions = stmt_data.get("Action", [])
-            if isinstance(raw_actions, str):
-                raw_actions = [raw_actions]
-
-            for action in raw_actions:
-                try:
-                    parsed_action = next(
-                        policy_action
-                        for policy_action in PolicyAction
-                        if policy_action.value == action
-                    )
-                except StopIteration:
-                    raise PolicyOperationError(
-                        f"Unsupported action '{action}' in policy {policy_name}"
-                    )
-
-                # Create a separate statement for each action
-                statement = PolicyStatement(
-                    effect=PolicyEffect.ALLOW,
-                    action=parsed_action,
-                    resource=stmt_data.get("Resource", []),
-                    condition=stmt_data.get("Condition"),
-                    principal=stmt_data.get("Principal"),
+            
+            try:
+                statement = PolicyStatement.from_dict(
+                    {
+                        "Effect": "Allow",
+                        "Action": stmt_data.get("Action", []),
+                        "Resource": stmt_data.get("Resource", []),
+                        "Condition": stmt_data.get("Condition"),
+                        "Principal": stmt_data.get("Principal"),
+                    }
                 )
-                statements.append(statement)
+            except ValueError as e:
+                raise PolicyOperationError(f"Policy {policy_name}: {e}")
+
+            statements.append(statement)
 
         policy_document = PolicyDocument(statement=statements)
 
