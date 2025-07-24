@@ -164,7 +164,7 @@ class GroupManager(ResourceManager[GroupModel]):
                 policy_model = await self.policy_manager.get_group_policy(group_name)
             except Exception as e:
                 logger.warning(f"Failed to get group policy - creating new policy")
-                policy_model = await self.policy_manager.create_group_policy(group_name)
+                policy_model = await self.policy_manager.ensure_group_policy(group_name)
 
             # Create the group
             if not await self.resource_exists(group_name):
