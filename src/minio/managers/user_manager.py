@@ -168,12 +168,10 @@ class UserManager(ResourceManager[UserModel]):
             if password is None:
                 password = self._generate_secure_password()
 
-            # Create user policy
-            try:
-                policy_model = await self.policy_manager.get_user_policy(username)
-            except Exception as e:
-                logger.warning(f"Failed to get user policy - creating new policy")
-                policy_model = await self.policy_manager.create_user_policy(username)
+            # Create user policies (home and system)
+            home_policy, system_policy = (
+                await self.policy_manager.create_user_policies(username)
+            )
 
             # Create the user
             if not await self.resource_exists(username):
@@ -187,9 +185,10 @@ class UserManager(ResourceManager[UserModel]):
                     )
 
             # Attach user policy only if not already attached
+            # TODO: will create method in PolicyManager to check and attach both policies
             if not await self.policy_manager.is_policy_attached_to_user(username):
                 await self.policy_manager.attach_policy_to_user(
-                    policy_model.policy_name, username
+                    home_policy.policy_name, username
                 )
 
             # Create user home directory structure
@@ -206,7 +205,7 @@ class UserManager(ResourceManager[UserModel]):
                 secret_key=password,
                 home_paths=home_paths,
                 groups=[],  # No groups assigned during creation
-                user_policy=policy_model,
+                user_policy=home_policy,
                 group_policies=[],  # No group policies during creation
                 total_policies=1,  # Just the user policy
                 accessible_paths=home_paths,  # user home path is accessible via newly created policy

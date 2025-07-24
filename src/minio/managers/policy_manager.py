@@ -205,6 +205,9 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         Create both home and system policies for a user.
 
+        This method is idempotent - if policies already exist, it will return
+        the existing policies instead of failing.
+
         Args:
             username: Username to create policies for
 
@@ -216,11 +219,37 @@ class PolicyManager(ResourceManager[PolicyModel]):
             home_policy = self._create_user_home_policy(username)
             system_policy = self._create_user_system_policy(username)
 
-            # Create both policies in MinIO
-            await self._create_minio_policy(home_policy)
-            logger.info(f"Created user home policy: {home_policy.policy_name}")
-            await self._create_minio_policy(system_policy)
-            logger.info(f"Created system policy: {system_policy.policy_name}")
+            # Check if home policy already exists
+            home_exists = await self.resource_exists(home_policy.policy_name)
+            if home_exists:
+                logger.info(
+                    f"User home policy already exists: {home_policy.policy_name}"
+                )
+                # Load existing policy to return
+                existing_home = await self._load_minio_policy(home_policy.policy_name)
+                if existing_home:
+                    home_policy = existing_home
+            else:
+                # Create home policy
+                await self._create_minio_policy(home_policy)
+                logger.info(f"Created user home policy: {home_policy.policy_name}")
+
+            # Check if system policy already exists
+            system_exists = await self.resource_exists(system_policy.policy_name)
+            if system_exists:
+                logger.info(
+                    f"User system policy already exists: {system_policy.policy_name}"
+                )
+                # Load existing policy to return
+                existing_system = await self._load_minio_policy(
+                    system_policy.policy_name
+                )
+                if existing_system:
+                    system_policy = existing_system
+            else:
+                # Create system policy
+                await self._create_minio_policy(system_policy)
+                logger.info(f"Created system policy: {system_policy.policy_name}")
 
             return home_policy, system_policy
 
@@ -254,12 +283,30 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         Create policy for a group.
 
+        This method is idempotent - if the policy already exists, it will return
+        the existing policy instead of failing.
+
         Args:
             group_name: Group name to create policy for
         """
         async with self.operation_context("create_group_policy"):
-            # Create group policy (Currently only group home policy)
+            # Create group policy model (Currently only group home policy)
             group_policy = self._create_group_home_policy(group_name)
+
+            # Check if policy already exists
+            policy_exists = await self.resource_exists(group_policy.policy_name)
+            if policy_exists:
+                logger.info(f"Group policy already exists: {group_policy.policy_name}")
+                # Load existing policy to return
+                existing_policy = await self._load_minio_policy(
+                    group_policy.policy_name
+                )
+                if existing_policy:
+                    return existing_policy
+                # If loading fails, continue with creation
+                logger.warning(
+                    f"Failed to load existing policy {group_policy.policy_name}, recreating"
+                )
 
             # Create the policy in MinIO
             await self._create_minio_policy(group_policy)
