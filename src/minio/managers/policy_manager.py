@@ -703,6 +703,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
         try:
             # Use command building pattern
+            # NOTE: If policy already exists, it will be overwritten.
             cmd_args = self._command_builder.build_policy_command(
                 CommandPolicyAction.CREATE, policy_model.policy_name, temp_file_path
             )
