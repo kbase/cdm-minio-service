@@ -133,6 +133,18 @@ class PolicyCreator:
             PolicySectionType.DELETE_PERMISSIONS: [],
         }
 
+    def get_sections(self) -> Dict[PolicySectionType, List[PolicyStatement]]:
+        """
+        Get a copy of the current sections.
+
+        Returns:
+            Dict mapping section types to their statements
+        """
+        return {
+            section_type: statements.copy()
+            for section_type, statements in self._sections.items()
+        }
+
     def _get_current_policy(self) -> PolicyModel:
         """
         Get the current policy model from sections.
@@ -234,6 +246,22 @@ class PolicyCreator:
         except Exception as e:
             raise PolicyOperationError(f"Generated policy name is invalid: {e}") from e
 
+    def create_default_policy(self) -> "PolicyCreator":
+        """
+        Create default policy based on policy type.
+
+        Returns:
+            Self with default permissions added for method chaining
+        """
+        if self.policy_type == PolicyType.USER_HOME:
+            return self._create_default_user_home_policy()
+        elif self.policy_type == PolicyType.USER_SYSTEM:
+            return self._create_default_system_policy()
+        elif self.policy_type == PolicyType.GROUP_HOME:
+            return self._create_default_group_policy()
+        else:
+            raise PolicyOperationError(f"Unknown policy type: {self.policy_type}")
+
     def _add_path_access_via_builder(
         self, bucket_name: str, path: str, permission_level: PolicyPermissionLevel
     ) -> None:
@@ -278,6 +306,49 @@ class PolicyCreator:
                 self._sections[target_section].append(stmt)
             else:
                 raise PolicyOperationError(f"Unsupported policy action: {action}")
+
+    def _create_default_user_home_policy(self) -> "PolicyCreator":
+        """Create default user home policy with SQL and general warehouse paths."""
+        # Add access to user's SQL warehouse
+        self._add_path_access_via_builder(
+            self.config.default_bucket,
+            self.user_sql_warehouse_path,
+            PolicyPermissionLevel.ADMIN,
+        )
+
+        # Add access to user's general warehouse
+        self._add_path_access_via_builder(
+            self.config.default_bucket,
+            self.user_general_warehouse_path,
+            PolicyPermissionLevel.ADMIN,
+        )
+
+        return self
+
+    def _create_default_system_policy(self) -> "PolicyCreator":
+        """Create default system policy with system resource paths."""
+        # Get system paths for this user using the global configuration
+        system_paths = self._get_user_system_paths(self.target_name)
+
+        for bucket_name, path_permission_pairs in system_paths.items():
+            for path, permission_level in path_permission_pairs:
+                system_path = f"s3a://{bucket_name}/{path}"
+                self._add_path_access_via_builder(
+                    bucket_name, system_path, permission_level
+                )
+
+        return self
+
+    def _create_default_group_policy(self) -> "PolicyCreator":
+        """Create default group policy with group shared workspace paths."""
+        # Add access to group's general warehouse
+        self._add_path_access_via_builder(
+            self.config.default_bucket,
+            self.group_general_warehouse_path,
+            PolicyPermissionLevel.WRITE,
+        )
+
+        return self
 
     def _get_user_system_paths(
         self, username: str
