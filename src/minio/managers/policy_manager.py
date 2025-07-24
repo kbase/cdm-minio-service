@@ -3,11 +3,12 @@ import logging
 import tempfile
 from enum import Enum
 from pathlib import Path
-from typing import List
+from typing import List, Optional
 
 from ...service.exceptions import PolicyOperationError
 from ..core.minio_client import MinIOClient
 from ..core.policy_builder import PolicyBuilder
+from ..core.policy_creator import PolicyCreator
 from ..models.command import PolicyAction as CommandPolicyAction
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
@@ -17,8 +18,9 @@ from ..models.policy import (
     PolicyModel,
     PolicyPermissionLevel,
     PolicyStatement,
+    PolicyType,
 )
-from ..utils.validators import validate_policy_name
+from ..utils.validators import DATA_GOVERNANCE_POLICY_PREFIXES, validate_policy_name
 from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
@@ -132,7 +134,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         async with self.operation_context("get_policy"):
             policy_name = self.get_policy_name(target_type, target_name)
-            return await self._load_minio_policy(policy_name)
+            result = await self._load_minio_policy(policy_name)
+
+            if result is None:
+                raise PolicyOperationError(f"Policy {policy_name} not found")
+
+            return result
 
     async def update_policy(self, policy_model: PolicyModel) -> PolicyModel:
         """
@@ -174,14 +181,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     # === CONVENIENCE METHODS FOR USER/GROUP POLICIES ===
 
-    async def create_user_policy(self, username: str) -> PolicyModel:
-        """Create a default policy for a user."""
-        return await self.create_policy(TargetType.USER, username)
-
-    async def create_group_policy(self, group_name: str) -> PolicyModel:
-        """Create a default policy for a group."""
-        return await self.create_policy(TargetType.GROUP, group_name)
-
     async def get_user_policy(self, username: str) -> PolicyModel:
         """Retrieve the existing policy for a specific user."""
         return await self.get_policy(TargetType.USER, username)
@@ -197,6 +196,88 @@ class PolicyManager(ResourceManager[PolicyModel]):
     async def delete_group_policy(self, group_name: str) -> None:
         """Delete a group's policy from MinIO."""
         await self.delete_policy(TargetType.GROUP, group_name)
+
+    # === USER/GROUP POLICY MANAGEMENT ===
+
+    async def create_user_policies(
+        self, username: str
+    ) -> tuple[PolicyModel, PolicyModel]:
+        """
+        Create both home and system policies for a user.
+
+        Args:
+            username: Username to create policies for
+
+        Returns:
+            Tuple of (home_policy, system_policy)
+        """
+        async with self.operation_context("create_user_policy"):
+            # Create both policy models
+            home_policy = self._create_user_home_policy(username)
+            system_policy = self._create_user_system_policy(username)
+
+            # Create both policies in MinIO
+            await self._create_minio_policy(home_policy)
+            logger.info(f"Created user home policy: {home_policy.policy_name}")
+            await self._create_minio_policy(system_policy)
+            logger.info(f"Created system policy: {system_policy.policy_name}")
+
+            return home_policy, system_policy
+
+    def _create_user_home_policy(self, username: str) -> PolicyModel:
+        """Create user home policy"""
+        try:
+            builder = PolicyCreator(
+                policy_type=PolicyType.USER_HOME,
+                target_name=username,
+                config=self.config,
+            )
+            return builder.create_default_policy().build()
+        except Exception as e:
+            logger.error(f"Failed to create user home policy for {username}: {e}")
+            raise PolicyOperationError(f"Failed to create user home policy: {e}") from e
+
+    def _create_user_system_policy(self, username: str) -> PolicyModel:
+        """Create user system policy"""
+        try:
+            builder = PolicyCreator(
+                policy_type=PolicyType.USER_SYSTEM,
+                target_name=username,
+                config=self.config,
+            )
+            return builder.create_default_policy().build()
+        except Exception as e:
+            logger.error(f"Failed to create system policy for {username}: {e}")
+            raise PolicyOperationError(f"Failed to create system policy: {e}") from e
+
+    async def create_group_policy(self, group_name: str) -> PolicyModel:
+        """
+        Create policy for a group.
+
+        Args:
+            group_name: Group name to create policy for
+        """
+        async with self.operation_context("create_group_policy"):
+            # Create group policy (Currently only group home policy)
+            group_policy = self._create_group_home_policy(group_name)
+
+            # Create the policy in MinIO
+            await self._create_minio_policy(group_policy)
+            logger.info(f"Created group policy: {group_policy.policy_name}")
+            return group_policy
+
+    def _create_group_home_policy(self, group_name: str) -> PolicyModel:
+        """Create group home policy"""
+        try:
+            builder = PolicyCreator(
+                policy_type=PolicyType.GROUP_HOME,
+                target_name=group_name,
+                config=self.config,
+            )
+            return builder.create_default_policy().build()
+        except Exception as e:
+            logger.error(f"Failed to create group policy for {group_name}: {e}")
+            raise PolicyOperationError(f"Failed to create group policy: {e}") from e
 
     # === POLICY ATTACHMENT OPERATIONS ===
     async def attach_policy_to_user(self, policy_name: str, username: str) -> None:
@@ -681,8 +762,15 @@ class PolicyManager(ResourceManager[PolicyModel]):
             await self.attach_policy_to_group(policy_name, group_name)
             logger.info(f"Reattached {policy_name} to group {group_name}")
 
-    async def _load_minio_policy(self, policy_name: str) -> PolicyModel:
-        """Load a policy from MinIO using the command executor."""
+    async def _load_minio_policy(self, policy_name: str) -> Optional[PolicyModel]:
+        """Load a policy from MinIO using the command executor. Returns None for unsupported built-in policies."""
+        # Skip MinIO policies (built-in policies) that are not data governance policies
+        if not any(
+            policy_name.startswith(prefix) for prefix in DATA_GOVERNANCE_POLICY_PREFIXES
+        ):
+            logger.debug(f"Skipping MinIO policy: {policy_name}")
+            return None
+
         # Get policy info from MinIO
         cmd_args = self._command_builder.build_policy_command(
             CommandPolicyAction.INFO, policy_name
@@ -699,8 +787,10 @@ class PolicyManager(ResourceManager[PolicyModel]):
         # Create PolicyDocument from the policy JSON
         try:
             policy_document = PolicyDocument.from_dict(policy_json)
-        except ValueError as e:
-            raise PolicyOperationError(f"Policy {policy_name}: {e}")
+        except Exception as e:
+            raise PolicyOperationError(
+                f"Failed to load policy {policy_name}: {e}"
+            ) from e
 
         return PolicyModel(
             policy_name=policy_name,

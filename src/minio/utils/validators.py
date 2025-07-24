@@ -16,6 +16,23 @@ from ...service.exceptions import (
     ValidationError,
 )
 
+# Built-in policies that are not supported by the data governance service
+BUILT_IN_POLICIES = [
+    "readonly",
+    "readwrite",
+    "writeonly",
+    "diagnostics",
+    "public",
+    "consoleAdmin",
+]
+
+# Allowed policy prefixes for data governance policies
+DATA_GOVERNANCE_POLICY_PREFIXES = [
+    "user-home-policy-",
+    "user-system-policy-",
+    "group-policy-",
+]
+
 # =============================================================================
 # USERNAME VALIDATION
 # =============================================================================
@@ -365,24 +382,19 @@ def validate_policy_name(policy_name: str) -> str:
         raise PolicyValidationError("Policy name cannot start with a period")
 
     # Check for reserved policy names (MinIO built-in policies)
-    reserved_policies = {
-        "readonly",
-        "readwrite",
-        "writeonly",
-        "diagnostics",
-        "public",
-        "consoleAdmin",
-    }
-    if policy_name in reserved_policies:
+    if policy_name in BUILT_IN_POLICIES:
         raise PolicyValidationError(f"'{policy_name}' is a reserved policy name")
 
     # Avoid names that could be confused with system policies
     if policy_name.startswith("arn:"):
         raise PolicyValidationError("Policy name cannot start with 'arn:'")
 
-    # Recommended naming patterns for data governance (informational only)
-    valid_prefixes = ["user-", "group-"]
-    if not any(policy_name.lower().startswith(prefix) for prefix in valid_prefixes):
-        raise PolicyValidationError("Policy name should start with 'user-' or 'group-'")
+    # naming patterns for data governance
+    if not any(
+        policy_name.startswith(prefix) for prefix in DATA_GOVERNANCE_POLICY_PREFIXES
+    ):
+        raise PolicyValidationError(
+            "Policy name should start with 'user-home-policy-', 'user-system-policy-', or 'group-policy-'"
+        )
 
     return policy_name
