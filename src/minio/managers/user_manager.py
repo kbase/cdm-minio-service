@@ -170,7 +170,7 @@ class UserManager(ResourceManager[UserModel]):
 
             # Create user policies (home and system)
             home_policy, system_policy = (
-                await self.policy_manager.create_user_policies(username)
+                await self.policy_manager.ensure_user_policies(username)
             )
 
             # Create the user

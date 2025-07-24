@@ -94,31 +94,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     # === CORE POLICY CRUD OPERATIONS ===
 
-    async def create_policy(
-        self, target_type: TargetType, target_name: str
-    ) -> PolicyModel:
-        """
-        Create a default policy for a user or group with standard permissions.
-
-        This method generates a new policy with default access permissions based on the target type.
-        For users, it grants access to both SQL and general warehouse paths. For groups, it grants
-        access to the group's shared workspace.
-
-        Args:
-            target_type: The type of target (USER or GROUP) for the policy
-            target_name: The username or group name to create the policy for
-        """
-        async with self.operation_context("create_policy"):
-            policy_name = self.get_policy_name(target_type, target_name)
-
-            policy_model = self._build_default_policy(
-                target_type, target_name, policy_name
-            )
-
-            await self._create_minio_policy(policy_model)
-            logger.info(f"Created {target_type.value} policy: {policy_name}")
-            return policy_model
-
     async def get_policy(
         self, target_type: TargetType, target_name: str
     ) -> PolicyModel:
@@ -199,20 +174,22 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     # === USER/GROUP POLICY MANAGEMENT ===
 
-    async def create_user_policies(
+    async def ensure_user_policies(
         self, username: str
     ) -> tuple[PolicyModel, PolicyModel]:
         """
-        Create both home and system policies for a user.
+        Ensure both home and system policies exist for a user.
 
-        This method is idempotent - if policies already exist, it will return
-        the existing policies instead of failing.
+        This method guarantees that the user has both required policies:
+        - Home policy: Access to user's personal warehouses
+        - System policy: Access to system resources (logs, etc.)
+
+        If policies already exist, they are returned as-is. If they don't exist,
+        they are created with default permissions. This method is safe to call
+        multiple times and will not fail if policies already exist.
 
         Args:
-            username: Username to create policies for
-
-        Returns:
-            Tuple of (home_policy, system_policy)
+            username: Username to ensure policies for
         """
         async with self.operation_context("create_user_policy"):
             # Create both policy models
@@ -226,9 +203,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
                     f"User home policy already exists: {home_policy.policy_name}"
                 )
                 # Load existing policy to return
-                existing_home = await self._load_minio_policy(home_policy.policy_name)
-                if existing_home:
-                    home_policy = existing_home
+                home_policy = await self._load_minio_policy(home_policy.policy_name)
             else:
                 # Create home policy
                 await self._create_minio_policy(home_policy)
@@ -241,17 +216,13 @@ class PolicyManager(ResourceManager[PolicyModel]):
                     f"User system policy already exists: {system_policy.policy_name}"
                 )
                 # Load existing policy to return
-                existing_system = await self._load_minio_policy(
-                    system_policy.policy_name
-                )
-                if existing_system:
-                    system_policy = existing_system
+                system_policy = await self._load_minio_policy(system_policy.policy_name)
             else:
                 # Create system policy
                 await self._create_minio_policy(system_policy)
                 logger.info(f"Created system policy: {system_policy.policy_name}")
 
-            return home_policy, system_policy
+            return home_policy, system_policy  # type: ignore
 
     def _create_user_home_policy(self, username: str) -> PolicyModel:
         """Create user home policy"""
@@ -279,15 +250,19 @@ class PolicyManager(ResourceManager[PolicyModel]):
             logger.error(f"Failed to create system policy for {username}: {e}")
             raise PolicyOperationError(f"Failed to create system policy: {e}") from e
 
-    async def create_group_policy(self, group_name: str) -> PolicyModel:
+    async def ensure_group_policy(self, group_name: str) -> PolicyModel:
         """
-        Create policy for a group.
+        Ensure group policy exists for a group.
 
-        This method is idempotent - if the policy already exists, it will return
-        the existing policy instead of failing.
+        This method guarantees that the group has a policy for shared workspace access.
+        The policy provides access to the group's shared directory structure.
+
+        If the policy already exists, it is returned as-is. If it doesn't exist,
+        it is created with default group permissions. This method is safe to call
+        multiple times and will not fail if the policy already exists.
 
         Args:
-            group_name: Group name to create policy for
+            group_name: Group name to ensure policy for
         """
         async with self.operation_context("create_group_policy"):
             # Create group policy model (Currently only group home policy)
@@ -298,20 +273,13 @@ class PolicyManager(ResourceManager[PolicyModel]):
             if policy_exists:
                 logger.info(f"Group policy already exists: {group_policy.policy_name}")
                 # Load existing policy to return
-                existing_policy = await self._load_minio_policy(
-                    group_policy.policy_name
-                )
-                if existing_policy:
-                    return existing_policy
-                # If loading fails, continue with creation
-                logger.warning(
-                    f"Failed to load existing policy {group_policy.policy_name}, recreating"
-                )
+                group_policy = await self._load_minio_policy(group_policy.policy_name)
+            else:
+                # Create the policy in MinIO
+                await self._create_minio_policy(group_policy)
+                logger.info(f"Created group policy: {group_policy.policy_name}")
 
-            # Create the policy in MinIO
-            await self._create_minio_policy(group_policy)
-            logger.info(f"Created group policy: {group_policy.policy_name}")
-            return group_policy
+            return group_policy  # type: ignore
 
     def _create_group_home_policy(self, group_name: str) -> PolicyModel:
         """Create group home policy"""
@@ -650,18 +618,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
             raise PolicyOperationError("Failed to list all policies")
 
     # === PRIVATE HELPER METHODS ===
-
-    def _build_default_policy(
-        self, target_type: TargetType, target_name: str, policy_name: str
-    ) -> PolicyModel:
-        """Build default policy for user or group."""
-        resource_paths = self._get_target_resource_paths(target_type, target_name)
-        statements = self._create_policy_statements(resource_paths)
-
-        return PolicyModel(
-            policy_name=policy_name,
-            policy_document=PolicyDocument(statement=statements),
-        )
 
     def _get_target_resource_paths(
         self, target_type: TargetType, target_name: str
