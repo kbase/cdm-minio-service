@@ -197,6 +197,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             system_policy = self._create_user_system_policy(username)
 
             # Check if home policy already exists
+            # NOTE: Race condition possible - policy could be created between this check and creation
             home_exists = await self.resource_exists(home_policy.policy_name)
             if home_exists:
                 logger.info(
@@ -206,10 +207,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 home_policy = await self._load_minio_policy(home_policy.policy_name)
             else:
                 # Create home policy
+                # NOTE: _create_minio_policy will overwrite existing policies
                 await self._create_minio_policy(home_policy)
                 logger.info(f"Created user home policy: {home_policy.policy_name}")
 
             # Check if system policy already exists
+            # NOTE: Race condition possible - policy could be created between this check and creation
             system_exists = await self.resource_exists(system_policy.policy_name)
             if system_exists:
                 logger.info(
@@ -219,6 +222,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 system_policy = await self._load_minio_policy(system_policy.policy_name)
             else:
                 # Create system policy
+                # NOTE: _create_minio_policy will overwrite existing policies
                 await self._create_minio_policy(system_policy)
                 logger.info(f"Created system policy: {system_policy.policy_name}")
 
@@ -271,6 +275,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             group_policy = self._create_group_home_policy(group_name)
 
             # Check if policy already exists
+            # NOTE: Race condition possible - policy could be created between this check and creation
             policy_exists = await self.resource_exists(group_policy.policy_name)
             if policy_exists:
                 logger.info(f"Group policy already exists: {group_policy.policy_name}")
@@ -278,6 +283,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 group_policy = await self._load_minio_policy(group_policy.policy_name)
             else:
                 # Create the policy in MinIO
+                # NOTE: _create_minio_policy will overwrite existing policies
                 await self._create_minio_policy(group_policy)
                 logger.info(f"Created group policy: {group_policy.policy_name}")
 
@@ -746,6 +752,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         logger.info(f"Deleting policy {policy_name}")
         await self.delete_resource(policy_name)
         logger.info(f"Creating updated policy {policy_name}")
+        # NOTE: _create_minio_policy will overwrite existing policies
         await self._create_minio_policy(policy_model)
 
         # Reattach to the specific user/group
