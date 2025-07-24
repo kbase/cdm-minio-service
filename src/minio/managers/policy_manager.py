@@ -224,31 +224,33 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
             return home_policy, system_policy  # type: ignore
 
-    def _create_user_home_policy(self, username: str) -> PolicyModel:
-        """Create user home policy"""
+    def _create_policy_model(
+        self, policy_type: PolicyType, target_name: str
+    ) -> PolicyModel:
+        """Create a policy model for the given type and target."""
         try:
             builder = PolicyCreator(
-                policy_type=PolicyType.USER_HOME,
-                target_name=username,
+                policy_type=policy_type,
+                target_name=target_name,
                 config=self.config,
             )
             return builder.create_default_policy().build()
         except Exception as e:
-            logger.error(f"Failed to create user home policy for {username}: {e}")
-            raise PolicyOperationError(f"Failed to create user home policy: {e}") from e
+            policy_desc = policy_type.value.replace("_", " ")
+            logger.error(
+                f"Failed to create {policy_desc} policy for {target_name}: {e}"
+            )
+            raise PolicyOperationError(
+                f"Failed to create {policy_desc} policy: {e}"
+            ) from e
+
+    def _create_user_home_policy(self, username: str) -> PolicyModel:
+        """Create user home policy"""
+        return self._create_policy_model(PolicyType.USER_HOME, username)
 
     def _create_user_system_policy(self, username: str) -> PolicyModel:
         """Create user system policy"""
-        try:
-            builder = PolicyCreator(
-                policy_type=PolicyType.USER_SYSTEM,
-                target_name=username,
-                config=self.config,
-            )
-            return builder.create_default_policy().build()
-        except Exception as e:
-            logger.error(f"Failed to create system policy for {username}: {e}")
-            raise PolicyOperationError(f"Failed to create system policy: {e}") from e
+        return self._create_policy_model(PolicyType.USER_SYSTEM, username)
 
     async def ensure_group_policy(self, group_name: str) -> PolicyModel:
         """
@@ -283,16 +285,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     def _create_group_home_policy(self, group_name: str) -> PolicyModel:
         """Create group home policy"""
-        try:
-            builder = PolicyCreator(
-                policy_type=PolicyType.GROUP_HOME,
-                target_name=group_name,
-                config=self.config,
-            )
-            return builder.create_default_policy().build()
-        except Exception as e:
-            logger.error(f"Failed to create group policy for {group_name}: {e}")
-            raise PolicyOperationError(f"Failed to create group policy: {e}") from e
+        return self._create_policy_model(PolicyType.GROUP_HOME, group_name)
 
     # === POLICY ATTACHMENT OPERATIONS ===
     async def attach_policy_to_user(self, policy_name: str, username: str) -> None:
