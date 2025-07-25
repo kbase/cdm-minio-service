@@ -349,99 +349,150 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         Attach both home and system policies to a user.
 
+        This method ensures both policies are attached atomically - if one fails,
+        any newly attached policies are rolled back to maintain consistency.
+        Pre-existing policy attachments are preserved.
+
         Args:
             username: Username to attach policies to
 
         Raises:
             PolicyOperationError: If policy attachment fails or policies don't exist
+            
+        Note:
+            Rollback only affects policies attached during this operation.
+            If the home policy was already attached and system policy attachment fails,
+            the home policy remains attached (as it should).
         """
         async with self.operation_context("attach_user_policies"):
             home_policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
             system_policy_name = self.get_policy_name(PolicyType.USER_SYSTEM, username)
 
-            # Check if policies are already attached
-            home_already_attached = await self._is_policy_attached_to_target(
-                home_policy_name, PolicyTarget.USER, username
+            # Check current attachment status
+            attachment_status = await self._check_user_policy_attachment_status(
+                username, home_policy_name, system_policy_name
             )
-            system_already_attached = await self._is_policy_attached_to_target(
-                system_policy_name, PolicyTarget.USER, username
-            )
-
+            
             # Skip if both policies are already attached
-            if home_already_attached and system_already_attached:
+            if attachment_status["both_attached"]:
                 logger.info(f"Both policies already attached to user {username}")
                 return
 
-            # Validate that both policies exist before attachment
-            try:
-                home_policy = await self._load_minio_policy(home_policy_name)
-                system_policy = await self._load_minio_policy(system_policy_name)
-                if home_policy is None or system_policy is None:
-                    raise PolicyOperationError(
-                        "One or both policies do not exist or are unsupported"
-                    )
-            except Exception as e:
+            # Validate policies exist
+            await self._validate_user_policies_exist(home_policy_name, system_policy_name)
+
+            # Attach policies with rollback on failure
+            await self._attach_user_policies_with_rollback(
+                username, home_policy_name, system_policy_name, attachment_status
+            )
+
+    async def _check_user_policy_attachment_status(
+        self, username: str, home_policy_name: str, system_policy_name: str
+    ) -> dict[str, bool]:
+        """Check current attachment status of user policies."""
+        home_already_attached = await self._is_policy_attached_to_target(
+            home_policy_name, PolicyTarget.USER, username
+        )
+        system_already_attached = await self._is_policy_attached_to_target(
+            system_policy_name, PolicyTarget.USER, username
+        )
+        
+        return {
+            "home_attached": home_already_attached,
+            "system_attached": system_already_attached,
+            "both_attached": home_already_attached and system_already_attached,
+        }
+
+    async def _validate_user_policies_exist(
+        self, home_policy_name: str, system_policy_name: str
+    ) -> None:
+        """Validate that both user policies exist before attachment."""
+        try:
+            home_policy = await self._load_minio_policy(home_policy_name)
+            system_policy = await self._load_minio_policy(system_policy_name)
+            if home_policy is None or system_policy is None:
                 raise PolicyOperationError(
-                    f"Cannot attach policies - one or both policies do not exist: {e}"
-                ) from e
+                    "One or both policies do not exist or are unsupported"
+                )
+        except Exception as e:
+            raise PolicyOperationError(
+                f"Cannot attach policies - one or both policies do not exist: {e}"
+            ) from e
 
-            # Track attachment state for rollback
-            home_attached = home_already_attached
-            system_attached = system_already_attached
+    async def _attach_user_policies_with_rollback(
+        self,
+        username: str,
+        home_policy_name: str,
+        system_policy_name: str,
+        attachment_status: dict[str, bool],
+    ) -> None:
+        """Attach user policies with rollback logic on failure."""
+        home_was_attached_before = attachment_status["home_attached"]
+        system_was_attached_before = attachment_status["system_attached"]
+        
+        # Track what we actually attach during this operation
+        home_attached_by_us = False
+        system_attached_by_us = False
 
+        try:
+            # Attach home policy if not already attached
+            if not home_was_attached_before:
+                await self.attach_policy_to_user(home_policy_name, username)
+                home_attached_by_us = True
+                logger.info(f"Attached home policy {home_policy_name} to user {username}")
+
+            # Attach system policy if not already attached
+            if not system_was_attached_before:
+                await self.attach_policy_to_user(system_policy_name, username)
+                system_attached_by_us = True
+                logger.info(f"Attached system policy {system_policy_name} to user {username}")
+
+        except Exception as e:
+            # Only rollback policies that WE attached during this operation
+            await self._rollback_newly_attached_policies(
+                username, home_policy_name, system_policy_name, 
+                home_attached_by_us, system_attached_by_us, e
+            )
+
+    async def _rollback_newly_attached_policies(
+        self,
+        username: str,
+        home_policy_name: str,
+        system_policy_name: str,
+        home_attached_by_us: bool,
+        system_attached_by_us: bool,
+        original_error: Exception,
+    ) -> None:
+        """Rollback only policies that were newly attached during this operation."""
+        logger.error(f"Policy attachment failed, attempting rollback: {original_error}")
+        rollback_errors = []
+
+        # Only rollback system policy if WE attached it during this operation
+        if system_attached_by_us:
             try:
-                # Attach home policy if not already attached
-                if not home_already_attached:
-                    await self.attach_policy_to_user(home_policy_name, username)
-                    home_attached = True
-                    logger.info(
-                        f"Attached home policy {home_policy_name} to user {username}"
-                    )
+                await self.detach_policy_from_user(system_policy_name, username)
+                logger.info(f"Rolled back newly attached system policy for {username}")
+            except Exception as rollback_error:
+                rollback_errors.append(f"Failed to rollback system policy: {rollback_error}")
 
-                # Attach system policy if not already attached
-                if not system_already_attached:
-                    await self.attach_policy_to_user(system_policy_name, username)
-                    system_attached = True
-                    logger.info(
-                        f"Attached system policy {system_policy_name} to user {username}"
-                    )
+        # Only rollback home policy if WE attached it during this operation
+        if home_attached_by_us:
+            try:
+                await self.detach_policy_from_user(home_policy_name, username)
+                logger.info(f"Rolled back newly attached home policy for {username}")
+            except Exception as rollback_error:
+                rollback_errors.append(f"Failed to rollback home policy: {rollback_error}")
 
-            except Exception as e:
-                # Implement rollback logic for partial attachment failures
-                logger.error(f"Policy attachment failed, attempting rollback: {e}")
+        # If no rollback was needed, mention that
+        if not home_attached_by_us and not system_attached_by_us:
+            logger.info(f"No rollback needed - no new policies were attached for {username}")
 
-                rollback_errors = []
+        # Construct comprehensive error message
+        error_msg = f"Failed to attach user policies: {original_error}"
+        if rollback_errors:
+            error_msg += f"; Rollback errors: {'; '.join(rollback_errors)}"
 
-                # Rollback system policy if it was attached
-                if system_attached:
-                    try:
-                        await self.detach_policy_from_user(system_policy_name, username)
-                        logger.info(
-                            f"Rolled back system policy attachment for {username}"
-                        )
-                    except Exception as rollback_error:
-                        rollback_errors.append(
-                            f"Failed to rollback system policy: {rollback_error}"
-                        )
-
-                # Rollback home policy if it was attached
-                if home_attached:
-                    try:
-                        await self.detach_policy_from_user(home_policy_name, username)
-                        logger.info(
-                            f"Rolled back home policy attachment for {username}"
-                        )
-                    except Exception as rollback_error:
-                        rollback_errors.append(
-                            f"Failed to rollback home policy: {rollback_error}"
-                        )
-
-                # Construct error message
-                error_msg = f"Failed to attach user policies: {e}"
-                if rollback_errors:
-                    error_msg += f"; Rollback errors: {'; '.join(rollback_errors)}"
-
-                raise PolicyOperationError(error_msg) from e
+        raise PolicyOperationError(error_msg) from original_error
 
     async def detach_user_policies(self, username: str) -> None:
         """
