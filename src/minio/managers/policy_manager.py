@@ -1029,7 +1029,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Returns:
             True if policy is a system policy, False otherwise
         """
-        return policy_name.startswith("user-system-policy-")
+        return policy_name.startswith(USER_SYSTEM_POLICY_PREFIX)
 
     def is_user_home_policy(self, policy_name: str) -> bool:
         """
@@ -1041,7 +1041,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Returns:
             True if policy is a user home policy, False otherwise
         """
-        return policy_name.startswith("user-home-policy-")
+        return policy_name.startswith(USER_HOME_POLICY_PREFIX)
 
     def is_group_policy(self, policy_name: str) -> bool:
         """
@@ -1053,4 +1053,4 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Returns:
             True if policy is a group policy, False otherwise
         """
-        return policy_name.startswith("group-policy-")
+        return policy_name.startswith(GROUP_POLICY_PREFIX)
