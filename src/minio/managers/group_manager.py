@@ -7,8 +7,8 @@ from ..core.minio_client import MinIOClient
 from ..models.command import GroupAction
 from ..models.group import GroupModel
 from ..models.minio_config import MinIOConfig
+from ..models.policy import PolicyType
 from ..utils.validators import validate_group_name
-from .policy_manager import TargetType
 from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
@@ -102,7 +102,7 @@ class GroupManager(ResourceManager[GroupModel]):
     async def _pre_delete_cleanup(self, name: str, force: bool = False) -> None:
         """Clean up group resources before deletion."""
         # Clean up group policy
-        policy_name = self.policy_manager.get_policy_name(TargetType.GROUP, name)
+        policy_name = self.policy_manager.get_policy_name(PolicyType.GROUP_HOME, name)
         try:
             await self.policy_manager.detach_policy_from_group(policy_name, name)
         except Exception as e:

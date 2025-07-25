@@ -14,9 +14,8 @@ from typing import List, Optional, Union
 from ...service.exceptions import DataGovernanceError
 from ..core.minio_client import MinIOClient
 from ..models.minio_config import MinIOConfig
-from ..models.policy import PolicyPermissionLevel
+from ..models.policy import PolicyPermissionLevel, PolicyTarget
 from ..utils.validators import validate_s3_path
-from .policy_manager import TargetType
 
 logger = logging.getLogger(__name__)
 
@@ -40,17 +39,17 @@ class SharingResult:
     failed_groups: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
-    def add_success(self, target_type: TargetType, name: str) -> None:
+    def add_success(self, target_type: str, name: str) -> None:
         """Add a successful sharing target."""
-        if target_type == TargetType.USER:
+        if target_type == PolicyTarget.USER:
             self.shared_with_users.append(name)
         else:
             self.shared_with_groups.append(name)
 
-    def add_failure(self, target_type: TargetType, name: str, error: str) -> None:
+    def add_failure(self, target_type: str, name: str, error: str) -> None:
         """Add a failed sharing target."""
-        self.errors.append(f"Error sharing with {target_type.value} {name}: {error}")
-        if target_type == TargetType.USER:
+        self.errors.append(f"Error sharing with {target_type} {name}: {error}")
+        if target_type == PolicyTarget.USER:
             self.failed_users.append(name)
         else:
             self.failed_groups.append(name)
@@ -78,17 +77,17 @@ class UnsharingResult:
     failed_groups: List[str] = field(default_factory=list)
     warnings: List[str] = field(default_factory=list)
 
-    def add_success(self, target_type: TargetType, name: str) -> None:
+    def add_success(self, target_type: str, name: str) -> None:
         """Add a successful unsharing target."""
-        if target_type == TargetType.USER:
+        if target_type == PolicyTarget.USER:
             self.unshared_from_users.append(name)
         else:
             self.unshared_from_groups.append(name)
 
-    def add_failure(self, target_type: TargetType, name: str, error: str) -> None:
+    def add_failure(self, target_type: str, name: str, error: str) -> None:
         """Add a failed unsharing target."""
-        self.errors.append(f"Error unsharing from {target_type.value} {name}: {error}")
-        if target_type == TargetType.USER:
+        self.errors.append(f"Error unsharing from {target_type} {name}: {error}")
+        if target_type == PolicyTarget.USER:
             self.failed_users.append(name)
         else:
             self.failed_groups.append(name)
@@ -216,10 +215,10 @@ class SharingManager:
         result = SharingResult(path=path)
 
         await self._update_targets_sharing(
-            SharingOperation.ADD, TargetType.USER, with_users or [], path, result
+            SharingOperation.ADD, PolicyTarget.USER, with_users or [], path, result
         )
         await self._update_targets_sharing(
-            SharingOperation.ADD, TargetType.GROUP, with_groups or [], path, result
+            SharingOperation.ADD, PolicyTarget.GROUP, with_groups or [], path, result
         )
 
         logger.info(f"Sharing completed for {path}: {result.success_count} targets")
@@ -262,10 +261,10 @@ class SharingManager:
 
         # Process unsharing concurrently
         await self._update_targets_sharing(
-            SharingOperation.REMOVE, TargetType.USER, from_users or [], path, result
+            SharingOperation.REMOVE, PolicyTarget.USER, from_users or [], path, result
         )
         await self._update_targets_sharing(
-            SharingOperation.REMOVE, TargetType.GROUP, from_groups or [], path, result
+            SharingOperation.REMOVE, PolicyTarget.GROUP, from_groups or [], path, result
         )
 
         logger.info(f"Unsharing completed for {path}: {result.success_count} targets")
@@ -290,7 +289,7 @@ class SharingManager:
     async def _update_targets_sharing(
         self,
         operation: SharingOperation,
-        target_type: TargetType,
+        target_type: PolicyTarget,
         names: List[str],
         path: str,
         result: Union[SharingResult, UnsharingResult],
@@ -303,17 +302,17 @@ class SharingManager:
         for name in names:
             try:
                 await self._update_path_sharing(operation, target_type, name, path)
-                result.add_success(target_type, name)
+                result.add_success(target_type.value, name)
             except Exception as e:
                 logger.error(
                     f"Unexpected error {operation_verb} {target_type.value} {name}: {e}"
                 )
-                result.add_failure(target_type, name, f"Unexpected error: {e}")
+                result.add_failure(target_type.value, name, f"Unexpected error: {e}")
 
     async def _update_path_sharing(
         self,
         operation: SharingOperation,
-        target_type: TargetType,
+        target_type: PolicyTarget,
         target_name: str,
         path: str,
     ) -> None:
@@ -345,9 +344,9 @@ class SharingManager:
 
         await self.policy_manager.update_policy(updated_policy)
 
-    async def _get_policy(self, target_type: TargetType, target_name: str):
+    async def _get_policy(self, target_type: PolicyTarget, target_name: str):
         """Get existing policy for target."""
-        if target_type == TargetType.USER:
-            return await self.policy_manager.get_user_policy(target_name)
+        if target_type == PolicyTarget.USER:
+            return await self.policy_manager.get_user_home_policy(target_name)
         else:
             return await self.policy_manager.get_group_policy(target_name)

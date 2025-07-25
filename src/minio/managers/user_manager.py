@@ -9,9 +9,9 @@ from ...service.exceptions import UserOperationError
 from ..core.minio_client import MinIOClient
 from ..models.command import UserAction
 from ..models.minio_config import MinIOConfig
+from ..models.policy import PolicyType
 from ..models.user import UserModel
 from ..utils.validators import validate_username
-from .policy_manager import TargetType
 from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
@@ -114,11 +114,12 @@ class UserManager(ResourceManager[UserModel]):
 
     async def _pre_delete_cleanup(self, name: str, force: bool = False) -> None:
         """Clean up user resources before deletion."""
-        policy_name = self.policy_manager.get_policy_name(TargetType.USER, name)
+        # TODO: will implement detach_user_policies and delete_user_policies in PolicyManager
+        policy_name = self.policy_manager.get_policy_name(PolicyType.USER_HOME, name)
 
         # Clean up user policy
         await self.policy_manager.detach_policy_from_user(policy_name, name)
-        await self.policy_manager.delete_user_policy(name)
+        await self.policy_manager.delete_user_policies(name)
 
     async def _post_delete_cleanup(self, name: str) -> None:
         """Clean up user resources after deletion."""
@@ -169,8 +170,8 @@ class UserManager(ResourceManager[UserModel]):
                 password = self._generate_secure_password()
 
             # Create user policies (home and system)
-            home_policy, system_policy = (
-                await self.policy_manager.ensure_user_policies(username)
+            home_policy, system_policy = await self.policy_manager.ensure_user_policies(
+                username
             )
 
             # Create the user
@@ -205,7 +206,7 @@ class UserManager(ResourceManager[UserModel]):
                 secret_key=password,
                 home_paths=home_paths,
                 groups=[],  # No groups assigned during creation
-                user_policy=home_policy,
+                user_policies=[home_policy, system_policy],
                 group_policies=[],  # No group policies during creation
                 total_policies=1,  # Just the user policy
                 accessible_paths=home_paths,  # user home path is accessible via newly created policy
@@ -237,12 +238,16 @@ class UserManager(ResourceManager[UserModel]):
 
             # Gather user information
             user_groups = await self.group_manager.get_user_groups(username)
-            user_policy = await self.policy_manager.get_user_policy(username)
+            user_policy = await self.policy_manager.get_user_home_policy(username)
+            system_policy = await self.policy_manager.get_user_system_policy(username)
 
             # Calculate accessible paths
             all_accessible_paths = set()
             all_accessible_paths.update(
                 self.policy_manager.get_accessible_paths_from_policy(user_policy)
+            )
+            all_accessible_paths.update(
+                self.policy_manager.get_accessible_paths_from_policy(system_policy)
             )
 
             # Process group policies safely
@@ -260,7 +265,7 @@ class UserManager(ResourceManager[UserModel]):
                 secret_key="<redacted>",  # Don't return secret in GET requests
                 home_paths=self._get_user_home_paths(username),
                 groups=user_groups,
-                user_policy=user_policy,
+                user_policies=[user_policy, system_policy],
                 group_policies=group_policies,
                 total_policies=1 + len(group_policies),  # user policy + group policies
                 accessible_paths=sorted(list(all_accessible_paths)),
@@ -309,7 +314,7 @@ class UserManager(ResourceManager[UserModel]):
 
     async def get_user_policies(self, username: str) -> Dict[str, Any]:
         """
-        Retrieve all policies that apply to a user, including user's direct policy and all group policies.
+        Retrieve all policies that apply to a user, including user's home and system policies and all group policies.
 
         Args:
             username: The username to get policies for
@@ -320,7 +325,8 @@ class UserManager(ResourceManager[UserModel]):
                 raise UserOperationError(f"User {username} not found")
 
             # Get user's direct policy
-            user_policy = await self.policy_manager.get_user_policy(username)
+            user_policy = await self.policy_manager.get_user_home_policy(username)
+            system_policy = await self.policy_manager.get_user_system_policy(username)
 
             # Get user's group policies
             user_groups = await self.group_manager.get_user_groups(username)
@@ -331,7 +337,11 @@ class UserManager(ResourceManager[UserModel]):
                 if group_policy:
                     group_policies.append(group_policy)
 
-            return {"user_policy": user_policy, "group_policies": group_policies}
+            return {
+                "user_home_policy": user_policy,
+                "user_system_policy": system_policy,
+                "group_policies": group_policies,
+            }
 
     async def can_user_share_path(self, path: str, username: str) -> bool:
         """
@@ -371,10 +381,14 @@ class UserManager(ResourceManager[UserModel]):
             # Get all accessible paths from user policy and group policies
             all_accessible_paths = set()
 
-            # Add paths from user policy
-            user_policy = await self.policy_manager.get_user_policy(username)
+            # Add paths from user policies (both home and system)
+            user_policy = await self.policy_manager.get_user_home_policy(username)
+            system_policy = await self.policy_manager.get_user_system_policy(username)
             all_accessible_paths.update(
                 self.policy_manager.get_accessible_paths_from_policy(user_policy)
+            )
+            all_accessible_paths.update(
+                self.policy_manager.get_accessible_paths_from_policy(system_policy)
             )
 
             # Add paths from group policies
