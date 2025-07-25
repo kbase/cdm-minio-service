@@ -56,7 +56,10 @@ class UserPoliciesResponse(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
 
     username: Annotated[str, Field(description="Username", min_length=1)]
-    user_policy: Annotated[PolicyModel, Field(description="User's direct policy")]
+    user_home_policy: Annotated[PolicyModel, Field(description="User's home policy")]
+    user_system_policy: Annotated[
+        PolicyModel, Field(description="User's system policy")
+    ]
     group_policies: Annotated[
         list[PolicyModel], Field(description="Policies from group memberships")
     ]
@@ -143,12 +146,14 @@ async def get_my_policies(
 
     policies_data = await app_state.user_manager.get_user_policies(username)
 
-    user_policy = policies_data["user_policy"]
+    user_home_policy = policies_data["user_home_policy"]
+    user_system_policy = policies_data["user_system_policy"]
     group_policies = policies_data["group_policies"]
 
     response = UserPoliciesResponse(
         username=username,
-        user_policy=user_policy,
+        user_home_policy=user_home_policy,
+        user_system_policy=user_system_policy,
         group_policies=group_policies,
         total_policies=1 + len(group_policies),  # user policy + group policies
     )

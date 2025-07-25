@@ -61,9 +61,9 @@ class UserModel(BaseUserModel):
     groups: Annotated[
         List[str], Field(description="List of groups the user belongs to")
     ] = []
-    user_policy: Annotated[
-        Optional[PolicyModel], Field(description="Direct user policy", default=None)
-    ] = None
+    user_policies: Annotated[
+        List[PolicyModel], Field(description="User's policies (home and system)")
+    ] = []
     group_policies: Annotated[
         List[PolicyModel], Field(description="Policies from associated groups")
     ] = []
@@ -73,6 +73,3 @@ class UserModel(BaseUserModel):
     accessible_paths: Annotated[
         List[str], Field(description="All paths accessible by the user")
     ] = []
-
-
-

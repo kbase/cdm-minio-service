@@ -94,28 +94,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     # === CORE POLICY CRUD OPERATIONS ===
 
-    async def get_policy(
-        self, target_type: TargetType, target_name: str
-    ) -> PolicyModel:
-        """
-        Retrieve the existing policy for a user or group from MinIO.
-
-        This method loads the complete policy document including all statements,
-        permissions, and conditions from the MinIO server.
-
-        Args:
-            target_type: The type of target (USER or GROUP) to get the policy for
-            target_name: The username or group name to retrieve the policy for
-        """
-        async with self.operation_context("get_policy"):
-            policy_name = self.get_policy_name(target_type, target_name)
-            result = await self._load_minio_policy(policy_name)
-
-            if result is None:
-                raise PolicyOperationError(f"Policy {policy_name} not found")
-
-            return result
-
     async def update_policy(self, policy_model: PolicyModel) -> PolicyModel:
         """
         Update an existing policy in MinIO with new permissions or statements.
@@ -133,44 +111,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
             await self._update_minio_policy(policy_model)
             logger.info(f"Updated policy: {policy_model.policy_name}")
             return policy_model
-
-    async def delete_policy(self, target_type: TargetType, target_name: str) -> None:
-        """
-        Delete a user's or group's policy from MinIO.
-
-        This method permanently removes the policy from MinIO. The policy will be
-        automatically detached from any users or groups before deletion.
-
-        Args:
-            target_type: The type of target (USER or GROUP) to delete the policy for
-            target_name: The username or group name whose policy should be deleted
-        """
-        async with self.operation_context("delete_policy"):
-            policy_name = self.get_policy_name(target_type, target_name)
-
-            success = await self.delete_resource(policy_name)
-            if not success:
-                raise PolicyOperationError(f"Failed to delete policy: {policy_name}")
-
-            logger.info(f"Deleted {target_type.value} policy: {policy_name}")
-
-    # === CONVENIENCE METHODS FOR USER/GROUP POLICIES ===
-
-    async def get_user_policy(self, username: str) -> PolicyModel:
-        """Retrieve the existing policy for a specific user."""
-        return await self.get_policy(TargetType.USER, username)
-
-    async def get_group_policy(self, group_name: str) -> PolicyModel:
-        """Retrieve the existing policy for a specific group."""
-        return await self.get_policy(TargetType.GROUP, group_name)
-
-    async def delete_user_policy(self, username: str) -> None:
-        """Delete a user's policy from MinIO."""
-        await self.delete_policy(TargetType.USER, username)
-
-    async def delete_group_policy(self, group_name: str) -> None:
-        """Delete a group's policy from MinIO."""
-        await self.delete_policy(TargetType.GROUP, group_name)
 
     # === USER/GROUP POLICY MANAGEMENT ===
 
@@ -293,6 +233,118 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """Create group home policy"""
         return self._create_policy_model(PolicyType.GROUP_HOME, group_name)
 
+    async def get_user_home_policy(self, username: str) -> PolicyModel:
+        """
+        Retrieve the user's home policy from MinIO.
+
+        Args:
+            username: Username to get home policy for
+        """
+        async with self.operation_context("get_user_home_policy"):
+            policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
+            result = await self._load_minio_policy(policy_name)
+            if result is None:
+                raise PolicyOperationError(
+                    f"User home policy {policy_name} not found or unsupported"
+                )
+            return result
+
+    async def get_user_system_policy(self, username: str) -> PolicyModel:
+        """
+        Retrieve the user's system policy from MinIO.
+
+        Args:
+            username: Username to get system policy for
+        """
+        async with self.operation_context("get_user_system_policy"):
+            policy_name = self.get_policy_name(PolicyType.USER_SYSTEM, username)
+            result = await self._load_minio_policy(policy_name)
+            if result is None:
+                raise PolicyOperationError(
+                    f"User system policy {policy_name} not found or unsupported"
+                )
+            return result
+
+    async def get_group_policy(self, group_name: str) -> PolicyModel:
+        """
+        Retrieve the existing policy for a specific group with proper error handling.
+
+        Args:
+            group_name: Group name to get policy for
+        """
+        async with self.operation_context("get_group_policy"):
+            policy_name = self.get_policy_name(PolicyType.GROUP_HOME, group_name)
+            result = await self._load_minio_policy(policy_name)
+            if result is None:
+                raise PolicyOperationError(
+                    f"Group policy {policy_name} not found or unsupported"
+                )
+            return result
+
+    async def delete_user_policies(self, username: str) -> None:
+        """
+        Delete both home and system policies for a user.
+
+        Args:
+            username: Username to delete policies for
+
+        Raises:
+            PolicyOperationError: If policy deletion fails
+        """
+        async with self.operation_context("delete_user_policy"):
+            home_policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
+            system_policy_name = self.get_policy_name(PolicyType.USER_SYSTEM, username)
+
+            errors = []
+
+            # Try to delete home policy
+            try:
+                success = await self.delete_resource(home_policy_name)
+                if success:
+                    logger.info(f"Deleted user home policy: {home_policy_name}")
+                else:
+                    errors.append(f"Failed to delete home policy: {home_policy_name}")
+            except Exception as e:
+                logger.error(f"Error deleting home policy {home_policy_name}: {e}")
+                errors.append(f"Error deleting home policy: {e}")
+
+            # Try to delete system policy
+            try:
+                success = await self.delete_resource(system_policy_name)
+                if success:
+                    logger.info(f"Deleted system policy: {system_policy_name}")
+                else:
+                    errors.append(
+                        f"Failed to delete system policy: {system_policy_name}"
+                    )
+            except Exception as e:
+                logger.error(f"Error deleting system policy {system_policy_name}: {e}")
+                errors.append(f"Error deleting system policy: {e}")
+
+            # Raise error if any deletions failed
+            if errors:
+                error_msg = "; ".join(errors)
+                raise PolicyOperationError(
+                    f"Failed to delete user policies: {error_msg}"
+                )
+
+    async def delete_group_policy(self, group_name: str) -> None:
+        """
+        Delete a group's policy from MinIO with proper cleanup.
+
+        Args:
+            group_name: Group name to delete policy for
+        """
+        async with self.operation_context("delete_group_policy"):
+            policy_name = self.get_policy_name(PolicyType.GROUP_HOME, group_name)
+
+            success = await self.delete_resource(policy_name)
+            if not success:
+                raise PolicyOperationError(
+                    f"Failed to delete group policy: {policy_name}"
+                )
+            logger.info(f"Deleted group policy: {policy_name}")
+
     # === POLICY ATTACHMENT OPERATIONS ===
     async def attach_policy_to_user(self, policy_name: str, username: str) -> None:
         """
@@ -352,7 +404,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Returns:
             bool: True if the group's policy is attached to the group, False otherwise
         """
-        policy_name = self.get_policy_name(TargetType.GROUP, group_name)
+        policy_name = self.get_policy_name(PolicyType.GROUP_HOME, group_name)
         return await self._is_policy_attached_to_target(
             policy_name, TargetType.GROUP, group_name
         )
@@ -367,7 +419,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Returns:
             bool: True if the user's policy is attached to the user, False otherwise
         """
-        policy_name = self.get_policy_name(TargetType.USER, username)
+        policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
         return await self._is_policy_attached_to_target(
             policy_name, TargetType.USER, username
         )
@@ -566,22 +618,24 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     # === LISTING AND UTILITY METHODS ===
 
-    def get_policy_name(self, target_type: TargetType, target_name: str) -> str:
+    def get_policy_name(self, policy_type: PolicyType, target_name: str) -> str:
         """
         Generate a standardized policy name for a user or group.
 
-        This method creates consistent policy names following the pattern:
-        - User policies: "user-policy-{username}"
-        - Group policies: "group-policy-{groupname}"
-
         Args:
-            target_type: The type of target (USER or GROUP)
+            policy_type: The policy type (USER_HOME/USER_SYSTEM/GROUP_HOME)
             target_name: The username or group name
-
-        Returns:
-            str: The standardized policy name
         """
-        return f"{target_type.value}-policy-{target_name}"
+
+        try:
+            builder = PolicyCreator(
+                policy_type=policy_type,
+                target_name=target_name,
+                config=self.config,
+            )
+            return builder._generate_policy_name()
+        except Exception as e:
+            raise PolicyOperationError(f"Failed to generate policy name: {e}") from e
 
     async def list_all_policies(self) -> List[PolicyModel]:
         """
