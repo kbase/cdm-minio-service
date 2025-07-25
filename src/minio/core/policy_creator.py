@@ -7,7 +7,7 @@ For modifying existing policies, use PolicyBuilder.
 POLICY TYPES CREATED:
 
 1. USER HOME POLICIES (PolicyType.USER_HOME):
-   - Policy Name: "user-home-policy-{username}"
+   - Policy Name: "{USER_HOME_POLICY_PREFIX}{username}"
    - Grants ADMIN access to user's personal warehouses:
      * s3a://{bucket}/users-sql-warehouse/{username}/ (for Spark tables)
      * s3a://{bucket}/users-general-warehouse/{username}/ (for general files)
@@ -17,7 +17,7 @@ POLICY TYPES CREATED:
      with other users or groups via the sharing API endpoints
 
 2. USER SYSTEM POLICIES (PolicyType.USER_SYSTEM):
-   - Policy Name: "user-system-policy-{username}"
+   - Policy Name: "{USER_SYSTEM_POLICY_PREFIX}{username}"
    - Grants access to system resources defined in SYSTEM_RESOURCE_CONFIG:
      * Currently: s3a://cdm-spark-job-logs/spark-job-logs/{username}/ (WRITE access)
      * Future: Additional system resources as configured
@@ -25,7 +25,7 @@ POLICY TYPES CREATED:
    - User-scoped resources include username in path, global resources don't
 
 3. GROUP POLICIES (PolicyType.GROUP_HOME):
-   - Policy Name: "group-policy-{groupname}"
+   - Policy Name: "{GROUP_POLICY_PREFIX}{groupname}"
    - Grants WRITE access to group's shared workspace:
      * s3a://{bucket}/groups-general-warehouse/{groupname}/
    - Enables collaborative access for group members
@@ -47,7 +47,12 @@ from ..models.policy import (
     PolicyStatement,
     PolicyType,
 )
-from ..utils.validators import validate_policy_name
+from ..utils.validators import (
+    GROUP_POLICY_PREFIX,
+    USER_HOME_POLICY_PREFIX,
+    USER_SYSTEM_POLICY_PREFIX,
+    validate_policy_name,
+)
 from .policy_builder import PolicyBuilder
 
 logger = logging.getLogger(__name__)
@@ -232,11 +237,11 @@ class PolicyCreator:
             PolicyOperationError: If generated policy name is invalid
         """
         if self.policy_type == PolicyType.USER_HOME:
-            policy_name = f"user-home-policy-{self.target_name}"
+            policy_name = f"{USER_HOME_POLICY_PREFIX}{self.target_name}"
         elif self.policy_type == PolicyType.USER_SYSTEM:
-            policy_name = f"user-system-policy-{self.target_name}"
+            policy_name = f"{USER_SYSTEM_POLICY_PREFIX}{self.target_name}"
         elif self.policy_type == PolicyType.GROUP_HOME:
-            policy_name = f"group-policy-{self.target_name}"
+            policy_name = f"{GROUP_POLICY_PREFIX}{self.target_name}"
         else:
             raise PolicyOperationError(f"Unknown policy type: {self.policy_type}")
 
