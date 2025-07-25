@@ -26,11 +26,16 @@ BUILT_IN_POLICIES = [
     "consoleAdmin",
 ]
 
+# Individual policy prefix constants
+USER_HOME_POLICY_PREFIX = "user-home-policy-"
+USER_SYSTEM_POLICY_PREFIX = "user-system-policy-"
+GROUP_POLICY_PREFIX = "group-policy-"
+
 # Allowed policy prefixes for data governance policies
 DATA_GOVERNANCE_POLICY_PREFIXES = [
-    "user-home-policy-",
-    "user-system-policy-",
-    "group-policy-",
+    USER_HOME_POLICY_PREFIX,
+    USER_SYSTEM_POLICY_PREFIX,
+    GROUP_POLICY_PREFIX,
 ]
 
 # =============================================================================
@@ -394,7 +399,7 @@ def validate_policy_name(policy_name: str) -> str:
         policy_name.startswith(prefix) for prefix in DATA_GOVERNANCE_POLICY_PREFIXES
     ):
         raise PolicyValidationError(
-            "Policy name should start with 'user-home-policy-', 'user-system-policy-', or 'group-policy-'"
+            f"Policy name should start with '{USER_HOME_POLICY_PREFIX}', '{USER_SYSTEM_POLICY_PREFIX}', or '{GROUP_POLICY_PREFIX}'"
         )
 
     return policy_name
