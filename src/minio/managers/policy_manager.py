@@ -11,7 +11,6 @@ from ..core.policy_creator import PolicyCreator
 from ..models.command import PolicyAction as CommandPolicyAction
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
-    PolicyAction,
     PolicyDocument,
     PolicyEffect,
     PolicyModel,
@@ -823,73 +822,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
             return policies
         except Exception:
             raise PolicyOperationError("Failed to list all policies")
-
-    # === PRIVATE HELPER METHODS ===
-
-    def _create_policy_statements(
-        self, resource_paths: list[str]
-    ) -> list[PolicyStatement]:
-        """Create all required policy statements for S3 access."""
-        return [
-            self._create_list_all_buckets_statement(),
-            self._create_bucket_location_statement(),
-            self._create_list_bucket_statement(resource_paths),
-            self._create_object_operations_statement(resource_paths),
-        ]
-
-    def _create_list_all_buckets_statement(self) -> PolicyStatement:
-        """Create statement for listing all buckets (required for MinIO users to see buckets in the UI)."""
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=PolicyAction.LIST_ALL_MY_BUCKETS,
-            resource=["*"],
-            condition=None,
-            principal=None,
-        )
-
-    def _create_bucket_location_statement(self) -> PolicyStatement:
-        """Create statement for getting bucket location (required for MinIO users to see buckets in the UI)."""
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=PolicyAction.GET_BUCKET_LOCATION,
-            resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
-            condition=None,
-            principal=None,
-        )
-
-    def _create_list_bucket_statement(
-        self, resource_paths: list[str]
-    ) -> PolicyStatement:
-        """Create statement for listing bucket contents with path restrictions."""
-        prefix_conditions = []
-        for path in resource_paths:
-            prefix_conditions.extend([f"{path}/*", f"{path}"])
-
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=PolicyAction.LIST_BUCKET,
-            resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
-            condition={"StringLike": {"s3:prefix": prefix_conditions}},
-            principal=None,
-        )
-
-    def _create_object_operations_statement(
-        self, resource_paths: list[str]
-    ) -> PolicyStatement:
-        """Create statement for object-level operations (get, put, delete)."""
-        object_resources = [
-            f"arn:aws:s3:::{self.config.default_bucket}/{path}/*"
-            for path in resource_paths
-        ]
-
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            # TODO: This will be refactored with future PRs - PolicyStatement allows only 1 action now
-            action=PolicyAction.GET_OBJECT,
-            resource=object_resources,
-            condition=None,
-            principal=None,
-        )
 
     # === MinIO POLICY OPERATIONS ===
 
