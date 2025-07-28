@@ -350,9 +350,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         Attach both home and system policies to a user.
 
-        This method ensures both policies are attached atomically - if one fails,
-        any newly attached policies are rolled back to maintain consistency.
-        Pre-existing policy attachments are preserved.
 
         Args:
             username: Username to attach policies to
