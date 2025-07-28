@@ -433,15 +433,10 @@ class PolicyManager(ResourceManager[PolicyModel]):
         home_was_attached_before = attachment_status["home_attached"]
         system_was_attached_before = attachment_status["system_attached"]
 
-        # Track what we actually attach during this operation
-        home_attached_by_us = False
-        system_attached_by_us = False
-
         try:
             # Attach home policy if not already attached
             if not home_was_attached_before:
                 await self.attach_policy_to_user(home_policy_name, username)
-                home_attached_by_us = True
                 logger.info(
                     f"Attached home policy {home_policy_name} to user {username}"
                 )
@@ -449,7 +444,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
             # Attach system policy if not already attached
             if not system_was_attached_before:
                 await self.attach_policy_to_user(system_policy_name, username)
-                system_attached_by_us = True
                 logger.info(
                     f"Attached system policy {system_policy_name} to user {username}"
                 )
