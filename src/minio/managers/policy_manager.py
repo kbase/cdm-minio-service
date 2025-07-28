@@ -357,10 +357,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
         Raises:
             PolicyOperationError: If policy attachment fails or policies don't exist
 
-        Note:
-            Rollback only affects policies attached during this operation.
-            If the home policy was already attached and system policy attachment fails,
-            the home policy remains attached (as it should).
         """
         async with self.operation_context("attach_user_policies"):
             home_policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
