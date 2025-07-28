@@ -11,13 +11,28 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import List, Optional, Union
 
+from pydantic import BaseModel
+
 from ...service.exceptions import DataGovernanceError
 from ..core.minio_client import MinIOClient
 from ..models.minio_config import MinIOConfig
 from ..models.policy import PolicyPermissionLevel, PolicyTarget
-from ..utils.validators import validate_s3_path
+from ..utils.validators import (
+    GROUP_POLICY_PREFIX,
+    USER_HOME_POLICY_PREFIX,
+    validate_s3_path,
+)
+from .user_manager import GLOBAL_USER_GROUP
 
 logger = logging.getLogger(__name__)
+
+
+class PathAccessInfo(BaseModel):
+    """Result type for get_path_access_info method."""
+
+    users: List[str]
+    groups: List[str]
+    public: bool
 
 
 class SharingOperation(Enum):
@@ -37,7 +52,6 @@ class SharingResult:
     errors: List[str] = field(default_factory=list)
     failed_users: List[str] = field(default_factory=list)
     failed_groups: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
 
     def add_success(self, target_type: str, name: str) -> None:
         """Add a successful sharing target."""
@@ -75,7 +89,6 @@ class UnsharingResult:
     errors: List[str] = field(default_factory=list)
     failed_users: List[str] = field(default_factory=list)
     failed_groups: List[str] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
 
     def add_success(self, target_type: str, name: str) -> None:
         """Add a successful unsharing target."""
@@ -350,3 +363,148 @@ class SharingManager:
             return await self.policy_manager.get_user_home_policy(target_name)
         else:
             return await self.policy_manager.get_group_policy(target_name)
+
+    # === PUBLIC/PRIVATE ACCESS METHODS ===
+
+    async def make_public(
+        self,
+        path: str,
+        requesting_user: str,
+    ) -> SharingResult:
+        """
+        Make an S3 path publicly accessible by adding it to the global user group.
+
+        This method shares the path with the global user group (GLOBAL_USER_GROUP),
+        which all users are automatically members of, effectively making the path
+        accessible to all users in the system.
+
+        Args:
+            path: The S3 path to make public (e.g., "s3a://bucket/data/public-dataset/")
+            requesting_user: Username of the user requesting the operation
+        """
+        logger.info(f"Making path public: {path}")
+
+        await self._validate_and_authorize_request(path, requesting_user)
+
+        # Share with the global user group (which all users are members of)
+        result = await self.share_path(
+            path=path,
+            requesting_user=requesting_user,
+            with_groups=[GLOBAL_USER_GROUP],
+        )
+
+        logger.info(f"Path made public: {path} - Success: {result.success_count > 0}")
+        return result
+
+    async def make_private(
+        self,
+        path: str,
+        requesting_user: str,
+    ) -> UnsharingResult:
+        """
+        Make an S3 path completely private by removing it from ALL policies that have access.
+
+        This method finds all users and groups that currently have access to the specified
+        path and removes the path from their policies, effectively making it completely
+        private. Only the path owner (requesting user) will retain access through their
+        home directory policy.
+
+        Args:
+            path: The S3 path to make private (e.g., "s3a://bucket/data/dataset/")
+            requesting_user: Username of the user requesting the operation
+        """
+        logger.info(f"Making path completely private: {path}")
+
+        await self._validate_and_authorize_request(path, requesting_user)
+
+        # Find all current policies that have access to this path
+        current_access = await self.get_path_access_info(path)
+
+        users_to_remove = [
+            user for user in current_access.users if user != requesting_user
+        ]
+        groups_to_remove = current_access.groups
+
+        result = await self.unshare_path(
+            path=path,
+            requesting_user=requesting_user,
+            from_users=users_to_remove,
+            from_groups=groups_to_remove,
+        )
+
+        logger.info(f"Path made completely private: {path}")
+        return result
+
+    async def get_path_access_info(self, path: str) -> PathAccessInfo:
+        """
+        Get access information for a given S3 path.
+
+        This method searches through all user and group policies to find which users
+        and groups have access to the specified path or its parent paths.
+
+        Args:
+            path: The S3 path to search for (e.g., "s3a://bucket/data/project/")
+        """
+        logger.info(f"Getting path access info for: {path}")
+
+        validate_s3_path(path)
+
+        result = PathAccessInfo(
+            users=[],
+            groups=[],
+            public=False,
+        )
+
+        all_policies = await self.policy_manager.list_resources()
+
+        for policy_name in all_policies:
+            policy_model = await self.policy_manager._load_minio_policy(policy_name)
+            if policy_model is None:
+                continue
+
+            accessible_paths = self.policy_manager.get_accessible_paths_from_policy(
+                policy_model
+            )
+
+            if self._path_matches_any_accessible_path(path, accessible_paths):
+                if self.policy_manager.is_user_home_policy(policy_name):
+                    username = policy_name.replace(USER_HOME_POLICY_PREFIX, "")
+                    result.users.append(username)
+                elif self.policy_manager.is_group_policy(policy_name):
+                    group_name = policy_name.replace(GROUP_POLICY_PREFIX, "")
+                    result.groups.append(group_name)
+                    if group_name == GLOBAL_USER_GROUP:
+                        result.public = True
+                # Note: user-system-policy entries are not included as they represent
+                # system access rather than user-controlled data access
+
+        logger.info(
+            f"Path access found - Users: {len(result.users)}, "
+            f"Groups: {len(result.groups)}, Public: {result.public}"
+        )
+
+        return result
+
+    # === HELPER METHODS ===
+
+    def _path_matches_any_accessible_path(
+        self, target_path: str, accessible_paths: List[str]
+    ) -> bool:
+        """
+        Check if the target path matches any of the accessible paths.
+
+        Args:
+            target_path: The path to check for access
+            accessible_paths: List of paths that are accessible
+        """
+        target_normalized = target_path.rstrip("/")
+
+        for accessible_path in accessible_paths:
+            accessible_normalized = accessible_path.rstrip("/")
+
+            if target_normalized.startswith(
+                accessible_normalized
+            ) or accessible_normalized.startswith(target_normalized):
+                return True
+
+        return False
