@@ -422,7 +422,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         system_policy_name: str,
         attachment_status: dict[str, bool],
     ) -> None:
-        """Attach user policies with rollback logic on failure."""
+        """Attach user policies."""
         home_was_attached_before = attachment_status["home_attached"]
         system_was_attached_before = attachment_status["system_attached"]
 
