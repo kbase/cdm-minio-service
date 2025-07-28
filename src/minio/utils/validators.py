@@ -254,10 +254,14 @@ def validate_s3_path(path: str) -> str:
     # Validate bucket name using bucket validator
     validate_bucket_name(bucket)
 
-    # Validate object key if present
-    if len(path_parts) > 1 and path_parts[1]:
-        key = path_parts[1]
-        _validate_s3_object_key(key)
+    # Validate object key - it must be present for data governance operations
+    if len(path_parts) < 2 or not path_parts[1]:
+        raise PolicyValidationError(
+            "S3 path must include an object key (path within bucket) for data governance operations"
+        )
+    
+    key = path_parts[1]
+    _validate_s3_object_key(key)
 
     return path
 
