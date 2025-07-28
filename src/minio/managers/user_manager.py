@@ -9,7 +9,6 @@ from ...service.exceptions import UserOperationError
 from ..core.minio_client import MinIOClient
 from ..models.command import UserAction
 from ..models.minio_config import MinIOConfig
-from ..models.policy import PolicyType
 from ..models.user import UserModel
 from ..utils.validators import validate_username
 from .resource_manager import ResourceManager
@@ -114,11 +113,7 @@ class UserManager(ResourceManager[UserModel]):
 
     async def _pre_delete_cleanup(self, name: str, force: bool = False) -> None:
         """Clean up user resources before deletion."""
-        # TODO: will implement detach_user_policies and delete_user_policies in PolicyManager
-        policy_name = self.policy_manager.get_policy_name(PolicyType.USER_HOME, name)
-
-        # Clean up user policy
-        await self.policy_manager.detach_policy_from_user(policy_name, name)
+        await self.policy_manager.detach_user_policies(name)
         await self.policy_manager.delete_user_policies(name)
 
     async def _post_delete_cleanup(self, name: str) -> None:
@@ -185,12 +180,9 @@ class UserManager(ResourceManager[UserModel]):
                         f"Failed to create MinIO user: {result.stderr}"
                     )
 
-            # Attach user policy only if not already attached
-            # TODO: will create method in PolicyManager to check and attach both policies
-            if not await self.policy_manager.is_policy_attached_to_user(username):
-                await self.policy_manager.attach_policy_to_user(
-                    home_policy.policy_name, username
-                )
+            # Attach both user policies (home and system) if not already attached
+            if not await self.policy_manager.is_policies_attached_to_user(username):
+                await self.policy_manager.attach_user_policies(username)
 
             # Create user home directory structure
             await self._create_user_home_directory(username)

@@ -1,7 +1,7 @@
 import json
 import logging
 import tempfile
-from enum import Enum
+import uuid
 from pathlib import Path
 from typing import List, Optional
 
@@ -12,27 +12,26 @@ from ..core.policy_creator import PolicyCreator
 from ..models.command import PolicyAction as CommandPolicyAction
 from ..models.minio_config import MinIOConfig
 from ..models.policy import (
-    PolicyAction,
     PolicyDocument,
     PolicyEffect,
     PolicyModel,
     PolicyPermissionLevel,
     PolicyStatement,
+    PolicyTarget,
     PolicyType,
 )
-from ..utils.validators import DATA_GOVERNANCE_POLICY_PREFIXES, validate_policy_name
+from ..utils.validators import (
+    DATA_GOVERNANCE_POLICY_PREFIXES,
+    GROUP_POLICY_PREFIX,
+    USER_HOME_POLICY_PREFIX,
+    USER_SYSTEM_POLICY_PREFIX,
+    validate_policy_name,
+)
 from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
 
 RESOURCE_TYPE = "policy"
-
-
-class TargetType(str, Enum):
-    """Target types for policy operations."""
-
-    USER = "user"
-    GROUP = "group"
 
 
 class PolicyManager(ResourceManager[PolicyModel]):
@@ -346,6 +345,148 @@ class PolicyManager(ResourceManager[PolicyModel]):
             logger.info(f"Deleted group policy: {policy_name}")
 
     # === POLICY ATTACHMENT OPERATIONS ===
+
+    async def attach_user_policies(self, username: str) -> None:
+        """
+        Attach both home and system policies to a user.
+
+
+        Args:
+            username: Username to attach policies to
+
+        Raises:
+            PolicyOperationError: If policy attachment fails or policies don't exist
+
+        """
+        async with self.operation_context("attach_user_policies"):
+            home_policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
+            system_policy_name = self.get_policy_name(PolicyType.USER_SYSTEM, username)
+
+            # Check current attachment status
+            attachment_status = await self._check_user_policy_attachment_status(
+                username, home_policy_name, system_policy_name
+            )
+
+            # Skip if both policies are already attached
+            if attachment_status["both_attached"]:
+                logger.info(f"Both policies already attached to user {username}")
+                return
+
+            # Validate policies exist
+            await self._validate_user_policies_exist(
+                home_policy_name, system_policy_name
+            )
+
+            # Attach policies with rollback on failure
+            await self._attach_user_policies(
+                username, home_policy_name, system_policy_name, attachment_status
+            )
+
+    async def _check_user_policy_attachment_status(
+        self, username: str, home_policy_name: str, system_policy_name: str
+    ) -> dict[str, bool]:
+        """Check current attachment status of user policies."""
+        home_already_attached = await self._is_policy_attached_to_target(
+            home_policy_name, PolicyTarget.USER, username
+        )
+        system_already_attached = await self._is_policy_attached_to_target(
+            system_policy_name, PolicyTarget.USER, username
+        )
+
+        return {
+            "home_attached": home_already_attached,
+            "system_attached": system_already_attached,
+            "both_attached": home_already_attached and system_already_attached,
+        }
+
+    async def _validate_user_policies_exist(
+        self, home_policy_name: str, system_policy_name: str
+    ) -> None:
+        """Validate that both user policies exist before attachment."""
+        try:
+            home_policy = await self._load_minio_policy(home_policy_name)
+            system_policy = await self._load_minio_policy(system_policy_name)
+            if home_policy is None or system_policy is None:
+                raise PolicyOperationError(
+                    "One or both policies do not exist or are unsupported"
+                )
+        except Exception as e:
+            raise PolicyOperationError(
+                f"Cannot attach policies - one or both policies do not exist: {e}"
+            ) from e
+
+    async def _attach_user_policies(
+        self,
+        username: str,
+        home_policy_name: str,
+        system_policy_name: str,
+        attachment_status: dict[str, bool],
+    ) -> None:
+        """Attach user policies."""
+        home_was_attached_before = attachment_status["home_attached"]
+        system_was_attached_before = attachment_status["system_attached"]
+
+        try:
+            # Attach home policy if not already attached
+            if not home_was_attached_before:
+                await self.attach_policy_to_user(home_policy_name, username)
+                logger.info(
+                    f"Attached home policy {home_policy_name} to user {username}"
+                )
+
+            # Attach system policy if not already attached
+            if not system_was_attached_before:
+                await self.attach_policy_to_user(system_policy_name, username)
+                logger.info(
+                    f"Attached system policy {system_policy_name} to user {username}"
+                )
+
+        except Exception as e:
+            raise PolicyOperationError(f"Failed to attach user policies: {e}") from e
+
+    async def detach_user_policies(self, username: str) -> None:
+        """
+        Detach both home and system policies from a user.
+
+        Args:
+            username: Username to detach policies from
+
+        Raises:
+            PolicyOperationError: If policy detachment fails
+        """
+        async with self.operation_context("detach_user_policies"):
+            home_policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
+            system_policy_name = self.get_policy_name(PolicyType.USER_SYSTEM, username)
+
+            errors = []
+
+            # Try to detach home policy
+            try:
+                await self.detach_policy_from_user(home_policy_name, username)
+                logger.info(
+                    f"Detached home policy {home_policy_name} from user {username}"
+                )
+            except Exception as e:
+                logger.error(f"Error detaching home policy {home_policy_name}: {e}")
+                errors.append(f"Error detaching home policy: {e}")
+
+            # Try to detach system policy
+            try:
+                await self.detach_policy_from_user(system_policy_name, username)
+                logger.info(
+                    f"Detached system policy {system_policy_name} from user {username}"
+                )
+            except Exception as e:
+                logger.error(f"Error detaching system policy {system_policy_name}: {e}")
+                errors.append(f"Error detaching system policy: {e}")
+
+            # Raise error if any detachments failed
+            if errors:
+                error_msg = "; ".join(errors)
+                raise PolicyOperationError(
+                    f"Failed to detach user policies: {error_msg}"
+                )
+
     async def attach_policy_to_user(self, policy_name: str, username: str) -> None:
         """
         Attach an existing policy to a user, granting them the policy's permissions.
@@ -355,7 +496,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             username: The username to attach the policy to
         """
         await self._attach_detach_policy(
-            policy_name, TargetType.USER, username, attach=True
+            policy_name, PolicyTarget.USER, username, attach=True
         )
 
     async def detach_policy_from_user(self, policy_name: str, username: str) -> None:
@@ -367,7 +508,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             username: The username to detach the policy from
         """
         await self._attach_detach_policy(
-            policy_name, TargetType.USER, username, attach=False
+            policy_name, PolicyTarget.USER, username, attach=False
         )
 
     async def attach_policy_to_group(self, policy_name: str, group_name: str) -> None:
@@ -379,7 +520,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             group_name: The group name to attach the policy to
         """
         await self._attach_detach_policy(
-            policy_name, TargetType.GROUP, group_name, attach=True
+            policy_name, PolicyTarget.GROUP, group_name, attach=True
         )
 
     async def detach_policy_from_group(self, policy_name: str, group_name: str) -> None:
@@ -391,7 +532,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             group_name: The group name to detach the policy from
         """
         await self._attach_detach_policy(
-            policy_name, TargetType.GROUP, group_name, attach=False
+            policy_name, PolicyTarget.GROUP, group_name, attach=False
         )
 
     async def is_policy_attached_to_group(self, group_name: str) -> bool:
@@ -406,26 +547,37 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         policy_name = self.get_policy_name(PolicyType.GROUP_HOME, group_name)
         return await self._is_policy_attached_to_target(
-            policy_name, TargetType.GROUP, group_name
+            policy_name, PolicyTarget.GROUP, group_name
         )
 
-    async def is_policy_attached_to_user(self, username: str) -> bool:
+    async def is_policies_attached_to_user(self, username: str) -> bool:
         """
-        Check if the user's policy is attached to the user.
+        Check if both user policies (home and system) are attached to the user.
 
         Args:
             username: The name of the user to check
 
         Returns:
-            bool: True if the user's policy is attached to the user, False otherwise
+            bool: True if BOTH user policies are attached to the user, False otherwise
         """
-        policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
-        return await self._is_policy_attached_to_target(
-            policy_name, TargetType.USER, username
+        home_policy_name = self.get_policy_name(PolicyType.USER_HOME, username)
+        system_policy_name = self.get_policy_name(PolicyType.USER_SYSTEM, username)
+
+        home_attached = await self._is_policy_attached_to_target(
+            home_policy_name, PolicyTarget.USER, username
+        )
+        system_attached = await self._is_policy_attached_to_target(
+            system_policy_name, PolicyTarget.USER, username
         )
 
+        return home_attached and system_attached
+
     async def _attach_detach_policy(
-        self, policy_name: str, target_type: TargetType, target_name: str, attach: bool
+        self,
+        policy_name: str,
+        target_type: PolicyTarget,
+        target_name: str,
+        attach: bool,
     ) -> None:
         """Generic method to attach or detach a policy to/from a user or group."""
         operation = "attach" if attach else "detach"
@@ -452,7 +604,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             )
 
     async def _is_policy_attached_to_target(
-        self, policy_name: str, target_type: TargetType, target_name: str
+        self, policy_name: str, target_type: PolicyTarget, target_name: str
     ) -> bool:
         """Check if a specific policy is attached to a target (user or group)."""
         entities = await self._get_policy_attached_entities(policy_name)
@@ -460,7 +612,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     async def _get_policy_attached_entities(
         self, policy_name: str
-    ) -> dict[TargetType, list[str]]:
+    ) -> dict[PolicyTarget, list[str]]:
         """Get all entities (users and groups) that have a specific policy attached."""
         cmd_args = self._command_builder.build_policy_entities_command(policy_name)
         result = await self._executor._execute_command(cmd_args)
@@ -472,10 +624,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
         return self._parse_policy_entities_output(result.stdout)
 
-    def _parse_policy_entities_output(self, output: str) -> dict[TargetType, list[str]]:
+    def _parse_policy_entities_output(
+        self, output: str
+    ) -> dict[PolicyTarget, list[str]]:
         """Parse the JSON output of 'mc admin policy entities --json' command."""
 
-        entities = {TargetType.USER: [], TargetType.GROUP: []}
+        entities = {PolicyTarget.USER: [], PolicyTarget.GROUP: []}
 
         # Parse the JSON output
         data = json.loads(output.strip())
@@ -489,12 +643,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
             # Extract users
             users = mapping.get("users", [])
             if users:
-                entities[TargetType.USER].extend(users)
+                entities[PolicyTarget.USER].extend(users)
 
             # Extract groups
             groups = mapping.get("groups", [])
             if groups:
-                entities[TargetType.GROUP].extend(groups)
+                entities[PolicyTarget.GROUP].extend(groups)
 
         return entities
 
@@ -670,85 +824,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
         except Exception:
             raise PolicyOperationError("Failed to list all policies")
 
-    # === PRIVATE HELPER METHODS ===
-
-    def _get_target_resource_paths(
-        self, target_type: TargetType, target_name: str
-    ) -> list[str]:
-        """Get resource paths for a target based on its type."""
-        if target_type == TargetType.USER:
-            return [
-                f"{self.config.users_sql_warehouse_prefix}/{target_name}",
-                f"{self.config.users_general_warehouse_prefix}/{target_name}",
-            ]
-        elif target_type == TargetType.GROUP:
-            return [f"{self.config.groups_general_warehouse_prefix}/{target_name}"]
-
-    def _create_policy_statements(
-        self, resource_paths: list[str]
-    ) -> list[PolicyStatement]:
-        """Create all required policy statements for S3 access."""
-        return [
-            self._create_list_all_buckets_statement(),
-            self._create_bucket_location_statement(),
-            self._create_list_bucket_statement(resource_paths),
-            self._create_object_operations_statement(resource_paths),
-        ]
-
-    def _create_list_all_buckets_statement(self) -> PolicyStatement:
-        """Create statement for listing all buckets (required for MinIO users to see buckets in the UI)."""
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=PolicyAction.LIST_ALL_MY_BUCKETS,
-            resource=["*"],
-            condition=None,
-            principal=None,
-        )
-
-    def _create_bucket_location_statement(self) -> PolicyStatement:
-        """Create statement for getting bucket location (required for MinIO users to see buckets in the UI)."""
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=PolicyAction.GET_BUCKET_LOCATION,
-            resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
-            condition=None,
-            principal=None,
-        )
-
-    def _create_list_bucket_statement(
-        self, resource_paths: list[str]
-    ) -> PolicyStatement:
-        """Create statement for listing bucket contents with path restrictions."""
-        prefix_conditions = []
-        for path in resource_paths:
-            prefix_conditions.extend([f"{path}/*", f"{path}"])
-
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            action=PolicyAction.LIST_BUCKET,
-            resource=[f"arn:aws:s3:::{self.config.default_bucket}"],
-            condition={"StringLike": {"s3:prefix": prefix_conditions}},
-            principal=None,
-        )
-
-    def _create_object_operations_statement(
-        self, resource_paths: list[str]
-    ) -> PolicyStatement:
-        """Create statement for object-level operations (get, put, delete)."""
-        object_resources = [
-            f"arn:aws:s3:::{self.config.default_bucket}/{path}/*"
-            for path in resource_paths
-        ]
-
-        return PolicyStatement(
-            effect=PolicyEffect.ALLOW,
-            # TODO: This will be refactored with future PRs - PolicyStatement allows only 1 action now
-            action=PolicyAction.GET_OBJECT,
-            resource=object_resources,
-            condition=None,
-            principal=None,
-        )
-
     # === MinIO POLICY OPERATIONS ===
 
     async def _create_minio_policy(self, policy_model: PolicyModel) -> None:
@@ -780,45 +855,187 @@ class PolicyManager(ResourceManager[PolicyModel]):
             except Exception as e:
                 logger.warning(f"Failed to cleanup temporary policy file: {e}")
 
-    async def _update_minio_policy(self, policy_model: PolicyModel) -> None:
-        """Update a policy in MinIO by handling attachments properly."""
+    def _generate_shadow_policy_name(self, original_name: str) -> str:
+        """Generate a unique shadow policy name."""
+        return f"{original_name}-shadow-{uuid.uuid4().hex[:8]}"
+
+    async def _create_shadow_policy(self, original_policy: PolicyModel) -> str:
+        """Create a shadow policy with the updated content."""
+        shadow_name = self._generate_shadow_policy_name(original_policy.policy_name)
+        shadow_policy = PolicyModel(
+            policy_name=shadow_name,
+            policy_document=original_policy.policy_document,
+        )
+
+        logger.info(f"Creating shadow policy: {shadow_name}")
+        await self._create_minio_policy(shadow_policy)
+        logger.info(f"Successfully created shadow policy: {shadow_name}")
+
+        return shadow_name
+
+    def _parse_policy_info(self, policy_name: str) -> tuple[str, PolicyType]:
+        """Parse policy name to extract target name and policy type."""
+        if self.is_user_home_policy(policy_name):
+            target_name = policy_name.replace(USER_HOME_POLICY_PREFIX, "")
+            policy_type = PolicyType.USER_HOME
+        elif self.is_user_system_policy(policy_name):
+            target_name = policy_name.replace(USER_SYSTEM_POLICY_PREFIX, "")
+            policy_type = PolicyType.USER_SYSTEM
+        elif self.is_group_policy(policy_name):
+            target_name = policy_name.replace(GROUP_POLICY_PREFIX, "")
+            policy_type = PolicyType.GROUP_HOME
+        else:
+            raise PolicyOperationError(
+                f"Unknown policy naming pattern: {policy_name}. "
+                f"Expected {USER_HOME_POLICY_PREFIX}, {USER_SYSTEM_POLICY_PREFIX}, or {GROUP_POLICY_PREFIX} prefix."
+            )
+        return target_name, policy_type
+
+    async def _execute_shadow_policy_update(
+        self, policy_model: PolicyModel, target_name: str, policy_type: PolicyType
+    ) -> str:
+        """Execute the shadow policy update workflow."""
+        # Step 1: Create shadow policy with new content
+        shadow_name = await self._create_shadow_policy(policy_model)
+
+        # Step 2: Attach shadow policy (user/group now has BOTH old and new access)
+        await self._attach_shadow_policy(shadow_name, target_name, policy_type)
+
+        # Step 3: Replace original policy with updated content
+        await self._replace_original_policy(policy_model, target_name, policy_type)
+
+        # Step 4: Cleanup shadow policy
+        await self._detach_and_delete_shadow_policy(
+            shadow_name, target_name, policy_type
+        )
+
+        return shadow_name
+
+    async def _attach_shadow_policy(
+        self, shadow_name: str, target_name: str, policy_type: PolicyType
+    ) -> None:
+        """Attach shadow policy to user or group."""
+        if policy_type in [PolicyType.USER_HOME, PolicyType.USER_SYSTEM]:
+            logger.info(f"Attaching shadow policy {shadow_name} to user {target_name}")
+            await self.attach_policy_to_user(shadow_name, target_name)
+            logger.info(
+                f"User {target_name} now has access via both original and shadow policies"
+            )
+        elif policy_type == PolicyType.GROUP_HOME:
+            logger.info(f"Attaching shadow policy {shadow_name} to group {target_name}")
+            await self.attach_policy_to_group(shadow_name, target_name)
+            logger.info(
+                f"Group {target_name} now has access via both original and shadow policies"
+            )
+
+    async def _replace_original_policy(
+        self, policy_model: PolicyModel, target_name: str, policy_type: PolicyType
+    ) -> None:
+        """Replace original policy with updated content."""
         policy_name = policy_model.policy_name
 
-        # For user policies, detach from the specific user first
-        if policy_name.startswith(f"{TargetType.USER.value}-policy-"):
-            username = policy_name.replace(f"{TargetType.USER.value}-policy-", "")
+        # Detach original policy (user/group still has access via shadow)
+        if policy_type in [PolicyType.USER_HOME, PolicyType.USER_SYSTEM]:
             logger.info(
-                f"Detected user policy {policy_name} for user {username}, detaching first"
+                f"Detaching original policy {policy_name} from user {target_name}"
             )
-            await self.detach_policy_from_user(policy_name, username)
-            logger.info(f"Successfully detached {policy_name} from user {username}")
-
-        # For group policies, detach from the specific group first
-        elif policy_name.startswith(f"{TargetType.GROUP.value}-policy-"):
-            group_name = policy_name.replace(f"{TargetType.GROUP.value}-policy-", "")
+            await self.detach_policy_from_user(policy_name, target_name)
+        elif policy_type == PolicyType.GROUP_HOME:
             logger.info(
-                f"Detected group policy {policy_name} for group {group_name}, detaching first"
+                f"Detaching original policy {policy_name} from group {target_name}"
             )
-            await self.detach_policy_from_group(policy_name, group_name)
-            logger.info(f"Successfully detached {policy_name} from group {group_name}")
+            await self.detach_policy_from_group(policy_name, target_name)
 
-        # Now delete and recreate the policy
-        logger.info(f"Deleting policy {policy_name}")
+        # Delete original policy
+        logger.info(f"Deleting original policy {policy_name}")
         await self.delete_resource(policy_name)
-        logger.info(f"Creating updated policy {policy_name}")
-        # NOTE: _create_minio_policy will overwrite existing policies
+
+        # Create new policy with original name and updated content
+        logger.info(f"Creating updated policy with original name {policy_name}")
         await self._create_minio_policy(policy_model)
 
-        # Reattach to the specific user/group
-        if policy_name.startswith(f"{TargetType.USER.value}-policy-"):
-            username = policy_name.replace(f"{TargetType.USER.value}-policy-", "")
-            await self.attach_policy_to_user(policy_name, username)
-            logger.info(f"Reattached {policy_name} to user {username}")
+        # Attach new policy with original name
+        if policy_type in [PolicyType.USER_HOME, PolicyType.USER_SYSTEM]:
+            logger.info(f"Attaching updated policy {policy_name} to user {target_name}")
+            await self.attach_policy_to_user(policy_name, target_name)
+        elif policy_type == PolicyType.GROUP_HOME:
+            logger.info(
+                f"Attaching updated policy {policy_name} to group {target_name}"
+            )
+            await self.attach_policy_to_group(policy_name, target_name)
 
-        elif policy_name.startswith(f"{TargetType.GROUP.value}-policy-"):
-            group_name = policy_name.replace(f"{TargetType.GROUP.value}-policy-", "")
-            await self.attach_policy_to_group(policy_name, group_name)
-            logger.info(f"Reattached {policy_name} to group {group_name}")
+    async def _detach_and_delete_shadow_policy(
+        self, shadow_name: str, target_name: str, policy_type: PolicyType
+    ) -> None:
+        """Detach and delete shadow policy."""
+        # Detach shadow policy
+        if policy_type in [PolicyType.USER_HOME, PolicyType.USER_SYSTEM]:
+            logger.info(
+                f"Detaching shadow policy {shadow_name} from user {target_name}"
+            )
+            await self.detach_policy_from_user(shadow_name, target_name)
+        elif policy_type == PolicyType.GROUP_HOME:
+            logger.info(
+                f"Detaching shadow policy {shadow_name} from group {target_name}"
+            )
+            await self.detach_policy_from_group(shadow_name, target_name)
+
+        # Delete shadow policy
+        logger.info(f"Deleting shadow policy {shadow_name}")
+        await self.delete_resource(shadow_name)
+
+    async def _cleanup_shadow_policy(
+        self, shadow_name: str, target_name: str, policy_type: PolicyType
+    ) -> None:
+        """Clean up shadow policy on failure."""
+        try:
+            logger.info(f"Cleaning up shadow policy: {shadow_name}")
+
+            # Detach shadow policy if it was attached
+            if policy_type in [PolicyType.USER_HOME, PolicyType.USER_SYSTEM]:
+                try:
+                    await self.detach_policy_from_user(shadow_name, target_name)
+                except Exception:
+                    pass  # Shadow might not be attached, ignore errors
+            elif policy_type == PolicyType.GROUP_HOME:
+                try:
+                    await self.detach_policy_from_group(shadow_name, target_name)
+                except Exception:
+                    pass  # Shadow might not be attached, ignore errors
+
+            # Delete shadow policy
+            await self.delete_resource(shadow_name)
+            logger.info(f"Successfully cleaned up shadow policy: {shadow_name}")
+
+        except Exception as cleanup_error:
+            logger.warning(
+                f"Failed to cleanup shadow policy {shadow_name}: {cleanup_error}"
+            )
+
+    async def _update_minio_policy(self, policy_model: PolicyModel) -> None:
+        """Update a policy in MinIO using shadow policy pattern to eliminate access downtime."""
+        policy_name = policy_model.policy_name
+        target_name, policy_type = self._parse_policy_info(policy_name)
+
+        logger.info(
+            f"Updating {policy_type} policy {policy_name} for {target_name} using shadow policy pattern"
+        )
+
+        shadow_name = None
+        try:
+            shadow_name = await self._execute_shadow_policy_update(
+                policy_model, target_name, policy_type
+            )
+            logger.info(
+                f"Successfully updated policy {policy_name} for {target_name} with zero downtime"
+            )
+        except Exception as e:
+            logger.error(f"Shadow policy update failed for {policy_name}: {e}")
+            if shadow_name:
+                await self._cleanup_shadow_policy(shadow_name, target_name, policy_type)
+            raise PolicyOperationError(
+                f"Failed to update policy {policy_name} using shadow policy pattern: {e}"
+            ) from e
 
     async def _load_minio_policy(self, policy_name: str) -> Optional[PolicyModel]:
         """Load a policy from MinIO using the command executor. Returns None for unsupported built-in policies."""
@@ -854,3 +1071,39 @@ class PolicyManager(ResourceManager[PolicyModel]):
             policy_name=policy_name,
             policy_document=policy_document,
         )
+
+    def is_user_system_policy(self, policy_name: str) -> bool:
+        """
+        Check if a policy is a system policy.
+
+        Args:
+            policy_name: Policy name to check
+
+        Returns:
+            True if policy is a system policy, False otherwise
+        """
+        return policy_name.startswith(USER_SYSTEM_POLICY_PREFIX)
+
+    def is_user_home_policy(self, policy_name: str) -> bool:
+        """
+        Check if a policy is a user home policy.
+
+        Args:
+            policy_name: Policy name to check
+
+        Returns:
+            True if policy is a user home policy, False otherwise
+        """
+        return policy_name.startswith(USER_HOME_POLICY_PREFIX)
+
+    def is_group_policy(self, policy_name: str) -> bool:
+        """
+        Check if a policy is a group policy.
+
+        Args:
+            policy_name: Policy name to check
+
+        Returns:
+            True if policy is a group policy, False otherwise
+        """
+        return policy_name.startswith(GROUP_POLICY_PREFIX)
