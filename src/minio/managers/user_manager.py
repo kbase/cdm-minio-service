@@ -3,6 +3,7 @@ import logging
 import re
 import secrets
 import string
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...service.exceptions import UserOperationError
@@ -519,8 +520,8 @@ Happy data science!
     async def _delete_user_system_directory(self, username: str) -> None:
         """Delete user system directories and all contents (like Spark job logs)."""
 
-        # Get system paths for this user using the global configuration
-        system_paths = self._get_user_system_paths(username)
+        # Get only user-scoped system paths to avoid deleting global resources
+        system_paths = self._get_user_system_paths(username, user_scoped_only=True)
 
         # Delete directories for each system bucket and prefix
         for bucket_name, prefixes in system_paths.items():
@@ -539,25 +540,29 @@ Happy data science!
                     f"Deleted {len(objects)} objects from s3a://{bucket_name}/{prefix}/"
                 )
 
-    def _get_user_system_paths(self, username: str) -> Dict[str, List[str]]:
-        """Get system resource paths for a user using the global configuration."""
-        user_paths = {}
+    def _get_user_system_paths(
+        self, username: str, user_scoped_only: bool = False
+    ) -> Dict[str, List[str]]:
+        """Get system resource paths for a user using the global configuration.
+
+        Args:
+            username: The username to get paths for
+            user_scoped_only: If True, only returns user-scoped paths (ending with /{username}).
+                              If False, returns all system paths for directory creation.
+        """
+        user_paths = defaultdict(list)
 
         for _, resource_config in SYSTEM_RESOURCE_CONFIG.items():
             bucket = resource_config["bucket"]
             base_prefix = resource_config["base_prefix"]
             user_scoped = resource_config.get("user_scoped", True)
 
-            if user_scoped:
-                # User-specific resource path
-                path = f"{base_prefix}/{username}"
-            else:
-                # Global resource path (not user-specific)
-                path = base_prefix
+            # Skip global resources if only user-scoped paths are requested
+            if user_scoped_only and not user_scoped:
+                continue
 
-            if bucket in user_paths:
-                user_paths[bucket].append(path)
-            else:
-                user_paths[bucket] = [path]
+            # Generate path based on whether resource is user-scoped
+            path = f"{base_prefix}/{username}" if user_scoped else base_prefix
+            user_paths[bucket].append(path)
 
         return user_paths
