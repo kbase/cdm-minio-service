@@ -155,10 +155,11 @@ async def get_my_policies(
         user_home_policy=user_home_policy,
         user_system_policy=user_system_policy,
         group_policies=group_policies,
-        total_policies=1 + len(group_policies),  # user policy + group policies
+        total_policies=2
+        + len(group_policies),  # home policy + system policy + group policies
     )
 
-    logger.info(f"Retrieved {len(group_policies) + 1} policies for user {username}")
+    logger.info(f"Retrieved {len(group_policies) + 2} policies for user {username}")
     return response
 
 
