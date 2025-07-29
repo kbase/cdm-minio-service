@@ -262,8 +262,8 @@ class UserManager(ResourceManager[UserModel]):
                 groups=user_groups,
                 user_policies=[user_policy, system_policy],
                 group_policies=group_policies,
-                total_policies=2
-                + len(group_policies),  # home policy + system policy + group policies
+                # home policy + system policy + group policies
+                total_policies=2 + len(group_policies),
                 accessible_paths=sorted(list(all_accessible_paths)),
             )
 
