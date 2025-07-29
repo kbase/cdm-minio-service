@@ -73,7 +73,6 @@ def create_application() -> FastAPI:
     app.add_middleware(AuthMiddleware)
 
     # Include routers
-    # Include routers - organized by business domain
     app.include_router(health.router, tags=["health"])
     app.include_router(credentials.router, tags=["credentials"])
     app.include_router(sharing.router, tags=["sharing"])
