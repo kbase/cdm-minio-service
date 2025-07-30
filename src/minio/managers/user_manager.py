@@ -569,4 +569,4 @@ Happy data science!
             path = f"{base_prefix}/{username}" if user_scoped else base_prefix
             user_paths[bucket].append(path)
 
-        return user_paths
+        return dict(user_paths)
