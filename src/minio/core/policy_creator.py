@@ -77,23 +77,20 @@ SYSTEM_RESOURCE_CONFIG = {
         "user_scoped": True,  # Whether this resource is user-specific
         "permission_level": PolicyPermissionLevel.WRITE,
     },
-    # Future system resources can be added here:
-    #
-    # Creates policy with access to s3a://cdm-task-service/task-service/
-    # "task_service": {
-    #     "bucket": "cdm-task-service",
-    #     "base_prefix": "task-service",
-    #     "user_scoped": False,
-    #     "permission_level": PolicyPermissionLevel.READ,
-    # },
-    #
-    # Creates policy with access to s3a://cdm-user-scratch/
-    # "scratch": {
-    #     "bucket": "cdm-user-scratch",
-    #     "base_prefix": "",
-    #     "user_scoped": False,
-    #     "permission_level": PolicyPermissionLevel.WRITE,
-    # },
+    # Task-service-related resources
+    # Creates policy with access to s3a://cdmts/logs/ and s3a://cdmts/io/
+    "task_service_logs": {
+        "bucket": "cts",
+        "base_prefix": "logs",
+        "user_scoped": False,
+        "permission_level": PolicyPermissionLevel.READ,
+    },
+    "task_service_io": {
+        "bucket": "cts",
+        "base_prefix": "io",
+        "user_scoped": False,
+        "permission_level": PolicyPermissionLevel.WRITE,
+    },
 }
 
 

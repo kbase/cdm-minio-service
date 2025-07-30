@@ -3,10 +3,12 @@ import logging
 import re
 import secrets
 import string
+from collections import defaultdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from ...service.exceptions import UserOperationError
 from ..core.minio_client import MinIOClient
+from ..core.policy_creator import SYSTEM_RESOURCE_CONFIG
 from ..models.command import UserAction
 from ..models.minio_config import MinIOConfig
 from ..models.user import UserModel
@@ -15,7 +17,7 @@ from .resource_manager import ResourceManager
 
 logger = logging.getLogger(__name__)
 
-RESOURCE_TYPE = "user"
+RESOURCE_TYPE: str = "user"
 
 # This is a global group that all users are automatically added to
 # This group can be used to apply policies, share paths, etc. to all users
@@ -118,8 +120,9 @@ class UserManager(ResourceManager[UserModel]):
 
     async def _post_delete_cleanup(self, name: str) -> None:
         """Clean up user resources after deletion."""
-        # Delete user home directory
+        # Delete user home and system directories
         await self._delete_user_home_directory(name)
+        await self._delete_user_system_directory(name)
 
     # CORE USER OPERATIONS
 
@@ -184,8 +187,9 @@ class UserManager(ResourceManager[UserModel]):
             if not await self.policy_manager.is_policies_attached_to_user(username):
                 await self.policy_manager.attach_user_policies(username)
 
-            # Create user home directory structure
+            # Create user home and system directory structures
             await self._create_user_home_directory(username)
+            await self._create_user_system_directory(username)
             home_paths = self._get_user_home_paths(username)
 
             if not await self.group_manager.resource_exists(GLOBAL_USER_GROUP):
@@ -200,7 +204,7 @@ class UserManager(ResourceManager[UserModel]):
                 groups=[],  # No groups assigned during creation
                 user_policies=[home_policy, system_policy],
                 group_policies=[],  # No group policies during creation
-                total_policies=1,  # Just the user policy
+                total_policies=2,  # Home and system policies
                 accessible_paths=home_paths,  # user home path is accessible via newly created policy
             )
 
@@ -259,7 +263,8 @@ class UserManager(ResourceManager[UserModel]):
                 groups=user_groups,
                 user_policies=[user_policy, system_policy],
                 group_policies=group_policies,
-                total_policies=1 + len(group_policies),  # user policy + group policies
+                # home policy + system policy + group policies
+                total_policies=2 + len(group_policies),
                 accessible_paths=sorted(list(all_accessible_paths)),
             )
 
@@ -471,6 +476,27 @@ Happy data science!
         welcome_key = f"{self.users_general_warehouse_prefix}/{username}/README.txt"
         await self.client.put_object(bucket_name, welcome_key, welcome_content)
 
+    async def _create_user_system_directory(self, username: str) -> None:
+        """Create user system directory structure for system resources like Spark job logs."""
+
+        # Get system paths for this user using the global configuration
+        system_paths = self._get_user_system_paths(username)
+
+        # Create directories for each system bucket and prefix
+        for bucket_name, prefixes in system_paths.items():
+            # Ensure system bucket exists
+            if not await self.client.bucket_exists(bucket_name):
+                await self.client.create_bucket(bucket_name)
+
+            # Create directory markers for each prefix
+            for prefix in prefixes:
+                # Create directory marker
+                marker_key = f"{prefix}/.keep"
+                await self.client.put_object(
+                    bucket_name, marker_key, b"User system directory marker"
+                )
+                logger.info(f"Created system directory: s3a://{bucket_name}/{prefix}/")
+
     async def _delete_user_home_directory(self, username: str) -> None:
         """Delete user home directories and all contents (both SQL and general warehouse)."""
         bucket_name = self.config.default_bucket
@@ -483,10 +509,64 @@ Happy data science!
 
         for user_prefix in prefixes:
             # List all objects in user directory
-            objects = await self.client.list_objects(bucket_name, user_prefix)
+            objects = await self.client.list_objects(
+                bucket_name, user_prefix, list_all=True
+            )
 
             # Delete objects
             for obj_key in objects:
                 await self.client.delete_object(bucket_name, obj_key)
 
             logger.info(f"Deleted {len(objects)} objects from {user_prefix}")
+
+    async def _delete_user_system_directory(self, username: str) -> None:
+        """Delete user system directories and all contents (like Spark job logs)."""
+
+        # Get only user-scoped system paths to avoid deleting global resources
+        system_paths = self._get_user_system_paths(username, user_scoped_only=True)
+
+        # Delete directories for each system bucket and prefix
+        for bucket_name, prefixes in system_paths.items():
+            if not await self.client.bucket_exists(bucket_name):
+                continue  # Skip if bucket doesn't exist
+
+            for prefix in prefixes:
+                # List all objects in user system directory
+                objects = await self.client.list_objects(
+                    bucket_name, prefix, list_all=True
+                )
+
+                # Delete objects
+                for obj_key in objects:
+                    await self.client.delete_object(bucket_name, obj_key)
+
+                logger.info(
+                    f"Deleted {len(objects)} objects from s3a://{bucket_name}/{prefix}/"
+                )
+
+    def _get_user_system_paths(
+        self, username: str, user_scoped_only: bool = False
+    ) -> Dict[str, List[str]]:
+        """Get system resource paths for a user using the global configuration.
+
+        Args:
+            username: The username to get paths for
+            user_scoped_only: If True, only returns user-scoped paths (ending with /{username}).
+                              If False, returns all system paths for directory creation.
+        """
+        user_paths = defaultdict(list)
+
+        for _, resource_config in SYSTEM_RESOURCE_CONFIG.items():
+            bucket = resource_config["bucket"]
+            base_prefix = resource_config["base_prefix"]
+            user_scoped = resource_config.get("user_scoped", True)
+
+            # Skip global resources if only user-scoped paths are requested
+            if user_scoped_only and not user_scoped:
+                continue
+
+            # Generate path based on whether resource is user-scoped
+            path = f"{base_prefix}/{username}" if user_scoped else base_prefix
+            user_paths[bucket].append(path)
+
+        return dict(user_paths)

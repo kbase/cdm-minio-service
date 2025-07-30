@@ -465,7 +465,9 @@ Happy collaborating!
 
         try:
             # List all objects in group directory
-            objects = await self.client.list_objects(bucket_name, group_prefix)
+            objects = await self.client.list_objects(
+                bucket_name, group_prefix, list_all=True
+            )
 
             # Delete objects
             for obj_key in objects:
