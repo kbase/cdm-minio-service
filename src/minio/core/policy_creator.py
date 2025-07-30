@@ -80,13 +80,13 @@ SYSTEM_RESOURCE_CONFIG = {
     # Task-service-related resources
     # Creates policy with access to s3a://cdmts/logs/ and s3a://cdmts/io/
     "task_service_logs": {
-        "bucket": "cdmts",
+        "bucket": "cts",
         "base_prefix": "logs",
         "user_scoped": False,
         "permission_level": PolicyPermissionLevel.READ,
     },
     "task_service_io": {
-        "bucket": "cdmts",
+        "bucket": "cts",
         "base_prefix": "io",
         "user_scoped": False,
         "permission_level": PolicyPermissionLevel.WRITE,
