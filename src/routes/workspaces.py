@@ -80,6 +80,15 @@ class UserAccessiblePathsResponse(BaseModel):
     ]
 
 
+class UserSqlWarehousePrefixResponse(BaseModel):
+    """Response model for user's SQL warehouse prefix."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
+
+    username: Annotated[str, Field(description="Username", min_length=1)]
+    sql_warehouse_prefix: Annotated[str, Field(description="User's SQL warehouse prefix")]
+
+
 # ===== USER WORKSPACE ENDPOINTS =====
 
 
@@ -226,4 +235,29 @@ async def get_group_workspace(
     )
 
     logger.info(f"Retrieved group workspace for {group_name} by user {username}")
+    return response
+
+
+@router.get(
+    "/me/sql-warehouse-prefix",
+    response_model=UserSqlWarehousePrefixResponse,
+    summary="Get my SQL warehouse prefix",
+    description="Get the SQL warehouse prefix for the authenticated user.",
+)
+async def get_my_sql_warehouse_prefix(
+    authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
+):
+    """Get the SQL warehouse prefix for the authenticated user."""
+    app_state = get_app_state(request)
+
+    username = authenticated_user.user
+    sql_warehouse_prefix = f"s3a://{app_state.user_manager.config.default_bucket}/{app_state.user_manager.users_sql_warehouse_prefix}/{username}/"
+
+    response = UserSqlWarehousePrefixResponse(
+        username=username,
+        sql_warehouse_prefix=sql_warehouse_prefix,
+    )
+
+    logger.info(f"Retrieved SQL warehouse prefix for user {username}")
     return response
