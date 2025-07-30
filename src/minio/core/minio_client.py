@@ -263,18 +263,17 @@ class MinIOClient:
             )
             raise BucketOperationError(f"Object deletion failed: {e}") from e
 
-    async def list_objects(self, bucket_name: str, prefix: str = "") -> List[str]:
+    async def list_objects(self, bucket_name: str, prefix: str = "", list_all: bool = False) -> List[str]:
         """
         Lists objects in a bucket, optionally filtered by a prefix.
-        NOTE: This method is not designed to be used for listing large number of objects.
-        It will stop listing after MAX_LIST_OBJECTS_COUNT objects to prevent memory issues.
-
+        
         Args:
             bucket_name: The name of the bucket to list objects from.
             prefix: An optional prefix to filter the object keys.
+            list_all: If True, lists all objects without limit. If False, stops at MAX_LIST_OBJECTS_COUNT.
 
         Returns:
-            A list of object keys (strings), limited to MAX_LIST_OBJECTS_COUNT items.
+            A list of object keys (strings). Limited to MAX_LIST_OBJECTS_COUNT items unless list_all=True.
 
         Raises:
             BucketOperationError: If the object listing operation fails.
@@ -288,8 +287,8 @@ class MinIOClient:
                     if "Contents" in page:
                         page_objects = [obj["Key"] for obj in page["Contents"]]
 
-                        # Check if adding this page would exceed the limit
-                        if len(objects) + len(page_objects) > MAX_LIST_OBJECTS_COUNT:
+                        # Check if adding this page would exceed the limit (unless list_all=True)
+                        if not list_all and len(objects) + len(page_objects) > MAX_LIST_OBJECTS_COUNT:
                             # Add only what we can without exceeding the limit
                             remaining_slots = MAX_LIST_OBJECTS_COUNT - len(objects)
                             objects.extend(page_objects[:remaining_slots])

@@ -509,7 +509,9 @@ Happy data science!
 
         for user_prefix in prefixes:
             # List all objects in user directory
-            objects = await self.client.list_objects(bucket_name, user_prefix)
+            objects = await self.client.list_objects(
+                bucket_name, user_prefix, list_all=True
+            )
 
             # Delete objects
             for obj_key in objects:
@@ -530,7 +532,9 @@ Happy data science!
 
             for prefix in prefixes:
                 # List all objects in user system directory
-                objects = await self.client.list_objects(bucket_name, prefix)
+                objects = await self.client.list_objects(
+                    bucket_name, prefix, list_all=True
+                )
 
                 # Delete objects
                 for obj_key in objects:
