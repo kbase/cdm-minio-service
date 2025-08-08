@@ -37,6 +37,8 @@ class MinIOCommandBuilder:
             endpoint,
             access_key,
             secret_key,
+            "--api",  
+            "S3v4",
         ]
 
     # User Management Commands
