@@ -37,6 +37,8 @@ class MinIOCommandBuilder:
             endpoint,
             access_key,
             secret_key,
+            "--api",  
+            "S3v4",
         ]
 
     # User Management Commands
@@ -107,8 +109,6 @@ class MinIOCommandBuilder:
             AdminCommand.POLICY.value,
             action.value,
             self.alias,
-            "--api",  
-            "S3v4",
         ]
 
         # Add policy_name for all actions except LIST
