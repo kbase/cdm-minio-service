@@ -107,6 +107,8 @@ class MinIOCommandBuilder:
             AdminCommand.POLICY.value,
             action.value,
             self.alias,
+            "--api",  
+            "S3v4",
         ]
 
         # Add policy_name for all actions except LIST
