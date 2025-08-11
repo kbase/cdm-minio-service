@@ -19,6 +19,17 @@ services:
     # Note there is no bucket by default
     command: server --address 0.0.0.0:9002 --console-address 0.0.0.0:9003 /data
 
+  redis:
+    image: redis:8.0.1
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 5
+
   minio-manager:
     build:
       context: .
@@ -30,7 +41,9 @@ services:
       - MINIO_ROOT_PASSWORD=minio123
       - KBASE_AUTH_URL=https://ci.kbase.us/services/auth/
       - KBASE_ADMIN_ROLES=CDM_JUPYTERHUB_ADMIN
+      - REDIS_URL=redis://redis:6379
     ports:
       - "8000:8000"
     depends_on:
       - minio
+      - redis

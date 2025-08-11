@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from ...service.exceptions import PolicyOperationError
+from ..core.distributed_lock import DistributedLockManager
 from ..core.minio_client import MinIOClient
 from ..core.policy_builder import PolicyBuilder
 from ..core.policy_creator import PolicyCreator
@@ -47,6 +48,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
 
     def __init__(self, client: MinIOClient, config: MinIOConfig) -> None:
         super().__init__(client, config)
+        self._lock_manager = DistributedLockManager()
 
     # === ResourceManager Abstract Method Implementations ===
 
@@ -91,25 +93,32 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 f"Failed to parse policy list command output: {stdout}"
             ) from e
 
-    # === CORE POLICY CRUD OPERATIONS ===
-
     async def update_policy(self, policy_model: PolicyModel) -> PolicyModel:
         """
         Update an existing policy in MinIO with new permissions or statements.
 
         This method handles the complex process of updating policies by:
-        1. Detaching the policy from its current targets
-        2. Deleting the old policy
-        3. Creating the updated policy
-        4. Re-attaching the policy to its targets
+        1. Acquiring a distributed lock to coordinate updates across instances
+        2. Detaching the policy from its current targets
+        3. Deleting the old policy
+        4. Creating the updated policy
+        5. Re-attaching the policy to its targets
 
         Args:
             policy_model: The updated policy model to save to MinIO
+
+        Note:
+            This method uses distributed locking to prevent concurrent updates
+            across multiple service instances, ensuring safe multi-instance deployment.
         """
         async with self.operation_context("update_policy"):
-            await self._update_minio_policy(policy_model)
-            logger.info(f"Updated policy: {policy_model.policy_name}")
-            return policy_model
+            # Use distributed locking for multi-instance coordination
+            async with self._lock_manager.policy_update_lock(policy_model.policy_name):
+                await self._update_minio_policy(policy_model)
+                logger.info(
+                    f"Updated policy with distributed lock: {policy_model.policy_name}"
+                )
+                return policy_model
 
     # === USER/GROUP POLICY MANAGEMENT ===
 
