@@ -3,7 +3,7 @@ import logging
 import tempfile
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from ...service.exceptions import PolicyOperationError
 from ..core.distributed_lock import DistributedLockManager
@@ -98,32 +98,100 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 f"Failed to parse policy list command output: {stdout}"
             ) from e
 
-    async def update_policy(self, policy_model: PolicyModel) -> PolicyModel:
-        """
-        Update an existing policy in MinIO with new permissions or statements.
+    # === Read-modify-write policy updates (under lock) ===
 
-        This method performs a zero-downtime update using a shadow policy:
-        1. Acquire a distributed lock to coordinate updates across instances
-        2. Create and attach a temporary shadow policy with the updated content
-        3. Detach and delete the original policy, then recreate it with the updated content (using the original name)
-        4. Re-attach the updated original policy to its targets
-        5. Detach and delete the shadow policy
+    async def add_path_access_for_target(
+        self,
+        target_type: PolicyTarget,
+        target_name: str,
+        path: str,
+        permission_level: PolicyPermissionLevel,
+    ) -> None:
+        """
+        Grant path access to a target (user or group) using a safe read-modify-write.
+
+        The method acquires the distributed lock for the target's policy, reloads the
+        latest policy while holding the lock, applies the change (add path access), and
+        persists via the shadow-policy update flow.
 
         Args:
-            policy_model: The updated policy model to save to MinIO
-
-        Note:
-            This method uses distributed locking to prevent concurrent updates
-            across multiple service instances, ensuring safe multi-instance deployment.
+            target_type: The policy target type (user or group).
+            target_name: The username or group name.
+            path: The S3 path to grant (e.g., "s3a://bucket/data/project/").
+            permission_level: The access level to grant for the path.
         """
-        async with self.operation_context("update_policy"):
-            # Use distributed locking for multi-instance coordination
-            async with self._lock_manager.policy_update_lock(policy_model.policy_name):
-                await self._update_minio_policy(policy_model)
-                logger.info(
-                    f"Updated policy with distributed lock: {policy_model.policy_name}"
-                )
-                return policy_model
+        async with self.operation_context("add_path_access_for_target"):
+            await self._update_policy_for_target_with_transform(
+                target_type,
+                target_name,
+                lambda current: self.add_path_access_to_policy(
+                    current, path, permission_level
+                ),
+            )
+
+    async def remove_path_access_for_target(
+        self,
+        target_type: PolicyTarget,
+        target_name: str,
+        path: str,
+    ) -> None:
+        """
+        Revoke path access from a target (user or group) using a safe read-modify-write.
+
+        The method acquires the distributed lock for the target's policy, reloads the
+        latest policy while holding the lock, applies the change (remove path access),
+        and persists via the shadow-policy update flow.
+
+        Args:
+            target_type: The policy target type (user or group).
+            target_name: The username or group name.
+            path: The S3 path to revoke (e.g., "s3a://bucket/data/project/").
+        """
+        async with self.operation_context("remove_path_access_for_target"):
+            await self._update_policy_for_target_with_transform(
+                target_type,
+                target_name,
+                lambda current: self.remove_path_access_from_policy(current, path),
+            )
+
+    async def _load_policy_for_target(
+        self, target_type: PolicyTarget, target_name: str
+    ) -> tuple[str, PolicyModel]:
+        """
+        Resolve policy name for a target and load its current PolicyModel.
+        """
+        if target_type == PolicyTarget.USER:
+            policy_name = self.get_policy_name(PolicyType.USER_HOME, target_name)
+            policy_model = await self.get_user_home_policy(target_name)
+        elif target_type == PolicyTarget.GROUP:
+            policy_name = self.get_policy_name(PolicyType.GROUP_HOME, target_name)
+            policy_model = await self.get_group_policy(target_name)
+        else:
+            raise PolicyOperationError(
+                f"Unsupported target type for path access update: {target_type}"
+            )
+        return policy_name, policy_model
+
+    async def _update_policy_for_target_with_transform(
+        self,
+        target_type: PolicyTarget,
+        target_name: str,
+        transform: Callable[[PolicyModel], PolicyModel],
+    ) -> None:
+        """
+        This helper ensures consistency by acquiring the distributed lock for the
+        resolved policy, reloading the latest policy document while holding the lock,
+        applying the provided transformation function to produce a new PolicyModel,
+        and then persisting the change using the shadow-policy flow.
+        """
+        policy_name, _ = await self._load_policy_for_target(target_type, target_name)
+        async with self._lock_manager.policy_update_lock(policy_name):
+            # Re-load inside the lock for latest
+            _, current_policy_model = await self._load_policy_for_target(
+                target_type, target_name
+            )
+            updated_policy = transform(current_policy_model)
+            await self._update_minio_policy(updated_policy)
 
     # === USER/GROUP POLICY MANAGEMENT ===
 

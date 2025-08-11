@@ -85,7 +85,7 @@ async def build_app(app: FastAPI) -> None:
     # Initialize all managers with the shared client
     user_manager = UserManager(minio_client, config)
     group_manager = GroupManager(minio_client, config)
-    policy_manager = PolicyManager(minio_client, config)
+    policy_manager = PolicyManager(minio_client, config, lock_manager=lock_manager)
     sharing_manager = SharingManager(minio_client, config)
     logger.info("MinIO managers initialized")
 

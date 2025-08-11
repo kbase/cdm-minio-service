@@ -339,23 +339,21 @@ class SharingManager:
             )
 
         if operation == SharingOperation.ADD:
-            updated_policy = self.policy_manager.add_path_access_to_policy(
-                policy_model, path, PolicyPermissionLevel.WRITE
+            await self.policy_manager.add_path_access_for_target(
+                target_type, target_name, path, PolicyPermissionLevel.WRITE
             )
             log_message = (
                 f"Added path sharing: {path} to {target_type.value} {target_name}"
             )
             logger.debug(log_message)
         else:  # SharingOperation.REMOVE
-            updated_policy = self.policy_manager.remove_path_access_from_policy(
-                policy_model, path
+            await self.policy_manager.remove_path_access_for_target(
+                target_type, target_name, path
             )
             log_message = (
                 f"Removed path sharing: {path} from {target_type.value} {target_name}"
             )
             logger.info(log_message)
-
-        await self.policy_manager.update_policy(updated_policy)
 
     async def _get_policy(self, target_type: PolicyTarget, target_name: str):
         """Get existing policy for target."""
