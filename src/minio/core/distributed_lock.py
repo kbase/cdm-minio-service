@@ -10,7 +10,7 @@ from ...service.exceptions import PolicyOperationError
 
 logger = logging.getLogger(__name__)
 
-REDIS_LOCK_TIMEOUT = 30  # seconds
+REDIS_LOCK_TIMEOUT = 30  # seconds; ensure this safely exceeds worst-case critical section duration
 
 
 class DistributedLockManager:
@@ -50,7 +50,10 @@ class DistributedLockManager:
 
         Args:
             policy_name: Name of the policy to lock
-            timeout: Lock timeout in seconds (uses default if None)
+            timeout: Lock timeout in seconds (uses default if None). Set this high
+                enough to cover the entire critical section. If too short, the lock
+                may expire mid-operation, especially under slow networks or high
+                server load, which risks concurrent modifications.
 
         Raises:
             PolicyOperationError: If the lock cannot be acquired
