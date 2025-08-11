@@ -46,9 +46,14 @@ class PolicyManager(ResourceManager[PolicyModel]):
     - Policy templates and document generation
     """
 
-    def __init__(self, client: MinIOClient, config: MinIOConfig) -> None:
+    def __init__(
+        self,
+        client: MinIOClient,
+        config: MinIOConfig,
+        lock_manager: Optional[DistributedLockManager] = None,
+    ) -> None:
         super().__init__(client, config)
-        self._lock_manager = DistributedLockManager()
+        self._lock_manager = lock_manager or DistributedLockManager()
 
     # === ResourceManager Abstract Method Implementations ===
 
@@ -97,12 +102,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
         """
         Update an existing policy in MinIO with new permissions or statements.
 
-        This method handles the complex process of updating policies by:
-        1. Acquiring a distributed lock to coordinate updates across instances
-        2. Detaching the policy from its current targets
-        3. Deleting the old policy
-        4. Creating the updated policy
-        5. Re-attaching the policy to its targets
+        This method performs a zero-downtime update using a shadow policy:
+        1. Acquire a distributed lock to coordinate updates across instances
+        2. Create and attach a temporary shadow policy with the updated content
+        3. Detach and delete the original policy, then recreate it with the updated content (using the original name)
+        4. Re-attach the updated original policy to its targets
+        5. Detach and delete the shadow policy
 
         Args:
             policy_model: The updated policy model to save to MinIO
