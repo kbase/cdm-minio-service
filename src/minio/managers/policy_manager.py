@@ -154,24 +154,47 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 lambda current: self.remove_path_access_from_policy(current, path),
             )
 
-    async def _load_policy_for_target(
+    def _get_policy_name_for_target(
         self, target_type: PolicyTarget, target_name: str
-    ) -> tuple[str, PolicyModel]:
+    ) -> str:
         """
-        Resolve policy name for a target and load its current PolicyModel.
+        Resolve the MinIO policy name for a given target.
+
+        Note:
+            - USER targets map to user home policy
+            - GROUP targets map to group home policy
+            - User System policy are not used for path access updates
         """
         if target_type == PolicyTarget.USER:
-            policy_name = self.get_policy_name(PolicyType.USER_HOME, target_name)
+            return self.get_policy_name(PolicyType.USER_HOME, target_name)
+        elif target_type == PolicyTarget.GROUP:
+            return self.get_policy_name(PolicyType.GROUP_HOME, target_name)
+        else:
+            raise PolicyOperationError(
+                f"Unsupported target type for path access update: {target_type}"
+            )
+
+    async def _load_policy_for_target(
+        self, target_type: PolicyTarget, target_name: str
+    ) -> PolicyModel:
+        """
+        Load the current PolicyModel for a target from MinIO.
+
+        Note:
+            - USER targets map to user home policy
+            - GROUP targets map to group home policy
+            - User System policy are not used for path access updates
+        """
+        if target_type == PolicyTarget.USER:
             policy_model = await self.get_user_home_policy(target_name)
         elif target_type == PolicyTarget.GROUP:
-            policy_name = self.get_policy_name(PolicyType.GROUP_HOME, target_name)
             policy_model = await self.get_group_policy(target_name)
         else:
             raise PolicyOperationError(
                 f"Unsupported target type for path access update: {target_type}"
             )
-        
-        return policy_name, policy_model
+
+        return policy_model
 
     async def _update_policy_for_target_with_transform(
         self,
@@ -185,12 +208,12 @@ class PolicyManager(ResourceManager[PolicyModel]):
         applying the provided transformation function to produce a new PolicyModel,
         and then persisting the change using the shadow-policy flow.
         """
-        policy_name, _ = await self._load_policy_for_target(target_type, target_name)
+        policy_name = self._get_policy_name_for_target(target_type, target_name)
         if not self._lock_manager:
             raise PolicyOperationError("Distributed lock manager not initialized")
         async with self._lock_manager.policy_update_lock(policy_name):
             # Re-load inside the lock for latest
-            _, current_policy_model = await self._load_policy_for_target(
+            current_policy_model = await self._load_policy_for_target(
                 target_type, target_name
             )
             updated_policy = transform(current_policy_model)
