@@ -53,7 +53,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
         lock_manager: Optional[DistributedLockManager] = None,
     ) -> None:
         super().__init__(client, config)
-        self._lock_manager = lock_manager or DistributedLockManager()
+        self._lock_manager = lock_manager
 
     # === ResourceManager Abstract Method Implementations ===
 
@@ -191,6 +191,8 @@ class PolicyManager(ResourceManager[PolicyModel]):
         and then persisting the change using the shadow-policy flow.
         """
         policy_name, _ = await self._load_policy_for_target(target_type, target_name)
+        if not self._lock_manager:
+            raise PolicyOperationError("Distributed lock manager not initialized")
         async with self._lock_manager.policy_update_lock(policy_name):
             # Re-load inside the lock for latest
             _, current_policy_model = await self._load_policy_for_target(
