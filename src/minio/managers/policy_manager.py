@@ -60,7 +60,7 @@ class PolicyManager(ResourceManager[PolicyModel]):
             config: MinIO configuration for bucket and path conventions.
             lock_manager: Optional distributed lock manager. Required for any
                 operations that modify an existing policy's contents (e.g.,
-                update_policy, add_path_access_for_target, remove_path_access_for_target),
+                add_path_access_for_target, remove_path_access_for_target),
                 which acquire a lock to ensure safe read-modify-write across instances.
 
         Notes:
