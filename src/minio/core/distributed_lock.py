@@ -5,7 +5,6 @@ from typing import Optional
 
 import redis.asyncio as redis
 
-from ...service.arg_checkers import not_falsy
 from ...service.exceptions import PolicyOperationError
 
 logger = logging.getLogger(__name__)
@@ -25,7 +24,9 @@ class DistributedLockManager:
         """
         Initialize the distributed lock manager.
         """
-        self.redis_url = not_falsy(os.getenv("REDIS_URL"), "REDIS_URL")
+        self.redis_url = os.getenv("REDIS_URL")
+        if not self.redis_url:
+            raise ValueError("REDIS_URL is missing from environment variables")
         self.default_timeout = REDIS_LOCK_TIMEOUT
         self.redis = redis.from_url(
             self.redis_url,

@@ -330,14 +330,6 @@ class SharingManager:
         path: str,
     ) -> None:
         """Add or remove path sharing by updating the appropriate policy."""
-        policy_model = await self._get_policy(target_type, target_name)
-
-        if not policy_model:
-            raise DataGovernanceError(
-                f"No policy found for {target_type.value} {target_name}. "
-                f"User/group must be created first before sharing."
-            )
-
         if operation == SharingOperation.ADD:
             await self.policy_manager.add_path_access_for_target(
                 target_type, target_name, path, PolicyPermissionLevel.WRITE
@@ -354,13 +346,6 @@ class SharingManager:
                 f"Removed path sharing: {path} from {target_type.value} {target_name}"
             )
             logger.info(log_message)
-
-    async def _get_policy(self, target_type: PolicyTarget, target_name: str):
-        """Get existing policy for target."""
-        if target_type == PolicyTarget.USER:
-            return await self.policy_manager.get_user_home_policy(target_name)
-        else:
-            return await self.policy_manager.get_group_policy(target_name)
 
     # === PUBLIC/PRIVATE ACCESS METHODS ===
 
