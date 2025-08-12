@@ -52,6 +52,23 @@ class PolicyManager(ResourceManager[PolicyModel]):
         config: MinIOConfig,
         lock_manager: Optional[DistributedLockManager] = None,
     ) -> None:
+        """
+        Initialize the PolicyManager.
+
+        Args:
+            client: MinIO client instance used for executing commands and object ops.
+            config: MinIO configuration for bucket and path conventions.
+            lock_manager: Optional distributed lock manager. Required for any
+                operations that modify an existing policy's contents (e.g.,
+                update_policy, add_path_access_for_target, remove_path_access_for_target),
+                which acquire a lock to ensure safe read-modify-write across instances.
+
+        Notes:
+            - Read-only operations (listing, loading policies, computing accessible
+              paths, generating names) do not require a lock manager.
+            - If a modifying method is called without a lock manager, a
+              PolicyOperationError will be raised.
+        """
         super().__init__(client, config)
         self._lock_manager = lock_manager
 
