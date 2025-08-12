@@ -22,7 +22,9 @@ from ..utils.validators import (
     USER_HOME_POLICY_PREFIX,
     validate_s3_path,
 )
-from .user_manager import GLOBAL_USER_GROUP
+from .group_manager import GroupManager
+from .policy_manager import PolicyManager
+from .user_manager import GLOBAL_USER_GROUP, UserManager
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +123,14 @@ class SharingManager:
     SharingManager for high-level data sharing workflows.
     """
 
-    def __init__(self, client: MinIOClient, config: MinIOConfig):
+    def __init__(
+        self,
+        client: MinIOClient,
+        config: MinIOConfig,
+        policy_manager: PolicyManager,
+        user_manager: UserManager,
+        group_manager: GroupManager,
+    ):
         """
         Initialize SharingManager with dependency injection.
 
@@ -132,64 +141,9 @@ class SharingManager:
         self.client = client
         self.config = config
 
-        # Lazy initialization of dependent managers to avoid circular imports
-        self._policy_manager = None
-        self._user_manager = None
-        self._group_manager = None
-
-    @property
-    def user_manager(self):
-        """
-        Get the UserManager instance for user-related operations.
-
-        This property provides lazy initialization of the UserManager to avoid
-        circular import dependencies. The UserManager is used for user validation
-        and authorization checks during sharing operations.
-
-        Returns:
-            UserManager: Initialized UserManager instance
-        """
-        if self._user_manager is None:
-            from .user_manager import UserManager
-
-            self._user_manager = UserManager(self.client, self.config)
-        return self._user_manager
-
-    @property
-    def policy_manager(self):
-        """
-        Get the PolicyManager instance for policy-related operations.
-
-        This property provides lazy initialization of the PolicyManager to avoid
-        circular import dependencies. The PolicyManager handles all low-level
-        policy manipulation including adding/removing path access and updating policies.
-
-        Returns:
-            PolicyManager: Initialized PolicyManager instance
-        """
-        if self._policy_manager is None:
-            from .policy_manager import PolicyManager
-
-            self._policy_manager = PolicyManager(self.client, self.config)
-        return self._policy_manager
-
-    @property
-    def group_manager(self):
-        """
-        Get the GroupManager instance for group-related operations.
-
-        This property provides lazy initialization of the GroupManager to avoid
-        circular import dependencies. The GroupManager is used for group validation
-        and policy management during sharing operations.
-
-        Returns:
-            GroupManager: Initialized GroupManager instance
-        """
-        if self._group_manager is None:
-            from .group_manager import GroupManager
-
-            self._group_manager = GroupManager(self.client, self.config)
-        return self._group_manager
+        self.policy_manager = policy_manager
+        self.user_manager = user_manager
+        self.group_manager = group_manager
 
     # === SHARING OPERATIONS ===
 

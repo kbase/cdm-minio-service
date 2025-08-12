@@ -86,7 +86,13 @@ async def build_app(app: FastAPI) -> None:
     user_manager = UserManager(minio_client, config)
     group_manager = GroupManager(minio_client, config)
     policy_manager = PolicyManager(minio_client, config, lock_manager=lock_manager)
-    sharing_manager = SharingManager(minio_client, config)
+    sharing_manager = SharingManager(
+        minio_client,
+        config,
+        policy_manager=policy_manager,
+        user_manager=user_manager,
+        group_manager=group_manager,
+    )
     logger.info("MinIO managers initialized")
 
     # Store components in app state
