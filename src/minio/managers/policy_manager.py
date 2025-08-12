@@ -171,11 +171,6 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 f"Unsupported target type for path access update: {target_type}"
             )
         
-        if not policy_model:
-            raise PolicyOperationError(
-                f"Policy {policy_name} not found for {target_type.value} {target_name}"
-            )
-        
         return policy_name, policy_model
 
     async def _update_policy_for_target_with_transform(
