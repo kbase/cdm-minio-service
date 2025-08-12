@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 from fastapi import FastAPI, Request
 
+from src.minio.core.distributed_lock import DistributedLockManager
 from src.minio.core.minio_client import MinIOClient
 from src.minio.managers.group_manager import GroupManager
 from src.minio.managers.policy_manager import PolicyManager
@@ -33,6 +34,7 @@ class AppState(NamedTuple):
     group_manager: GroupManager
     policy_manager: PolicyManager
     sharing_manager: SharingManager
+    lock_manager: DistributedLockManager
 
 
 class RequestState(NamedTuple):
@@ -69,11 +71,28 @@ async def build_app(app: FastAPI) -> None:
     minio_client = await MinIOClient.create(config)
     logger.info("MinIO client session initialized")
 
+    # Initialize distributed lock manager
+    logger.info("Initializing distributed lock manager...")
+    lock_manager = DistributedLockManager()
+
+    # Verify Redis connection
+    if not await lock_manager.health_check():
+        raise RuntimeError(
+            "Failed to connect to Redis. Redis is required for distributed coordination."
+        )
+    logger.info("Distributed lock manager initialized and Redis connection verified")
+
     # Initialize all managers with the shared client
     user_manager = UserManager(minio_client, config)
     group_manager = GroupManager(minio_client, config)
-    policy_manager = PolicyManager(minio_client, config)
-    sharing_manager = SharingManager(minio_client, config)
+    policy_manager = PolicyManager(minio_client, config, lock_manager=lock_manager)
+    sharing_manager = SharingManager(
+        minio_client,
+        config,
+        policy_manager=policy_manager,
+        user_manager=user_manager,
+        group_manager=group_manager,
+    )
     logger.info("MinIO managers initialized")
 
     # Store components in app state
@@ -85,6 +104,7 @@ async def build_app(app: FastAPI) -> None:
         group_manager=group_manager,
         policy_manager=policy_manager,
         sharing_manager=sharing_manager,
+        lock_manager=lock_manager,
     )
     logger.info("Application state initialized")
 
@@ -96,9 +116,17 @@ async def destroy_app_state(app: FastAPI) -> None:
     Args:
         app: The FastAPI app.
     """
-    # Close MinIO client session if it exists
+    # Close services if they exist
     if hasattr(app.state, "_minio_manager_state") and app.state._minio_manager_state:
         try:
+            # Close Redis connection
+            await app.state._minio_manager_state.lock_manager.close()
+            logger.info("Redis connection closed")
+        except Exception as e:
+            logger.warning(f"Error closing Redis connection: {e}")
+
+        try:
+            # Close MinIO client session
             await app.state._minio_manager_state.minio_client.close_session()
             logger.info("MinIO client session closed")
         except Exception as e:

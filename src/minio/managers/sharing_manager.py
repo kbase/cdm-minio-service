@@ -22,7 +22,9 @@ from ..utils.validators import (
     USER_HOME_POLICY_PREFIX,
     validate_s3_path,
 )
-from .user_manager import GLOBAL_USER_GROUP
+from .group_manager import GroupManager
+from .policy_manager import PolicyManager
+from .user_manager import GLOBAL_USER_GROUP, UserManager
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +123,14 @@ class SharingManager:
     SharingManager for high-level data sharing workflows.
     """
 
-    def __init__(self, client: MinIOClient, config: MinIOConfig):
+    def __init__(
+        self,
+        client: MinIOClient,
+        config: MinIOConfig,
+        policy_manager: PolicyManager,
+        user_manager: UserManager,
+        group_manager: GroupManager,
+    ):
         """
         Initialize SharingManager with dependency injection.
 
@@ -132,64 +141,9 @@ class SharingManager:
         self.client = client
         self.config = config
 
-        # Lazy initialization of dependent managers to avoid circular imports
-        self._policy_manager = None
-        self._user_manager = None
-        self._group_manager = None
-
-    @property
-    def user_manager(self):
-        """
-        Get the UserManager instance for user-related operations.
-
-        This property provides lazy initialization of the UserManager to avoid
-        circular import dependencies. The UserManager is used for user validation
-        and authorization checks during sharing operations.
-
-        Returns:
-            UserManager: Initialized UserManager instance
-        """
-        if self._user_manager is None:
-            from .user_manager import UserManager
-
-            self._user_manager = UserManager(self.client, self.config)
-        return self._user_manager
-
-    @property
-    def policy_manager(self):
-        """
-        Get the PolicyManager instance for policy-related operations.
-
-        This property provides lazy initialization of the PolicyManager to avoid
-        circular import dependencies. The PolicyManager handles all low-level
-        policy manipulation including adding/removing path access and updating policies.
-
-        Returns:
-            PolicyManager: Initialized PolicyManager instance
-        """
-        if self._policy_manager is None:
-            from .policy_manager import PolicyManager
-
-            self._policy_manager = PolicyManager(self.client, self.config)
-        return self._policy_manager
-
-    @property
-    def group_manager(self):
-        """
-        Get the GroupManager instance for group-related operations.
-
-        This property provides lazy initialization of the GroupManager to avoid
-        circular import dependencies. The GroupManager is used for group validation
-        and policy management during sharing operations.
-
-        Returns:
-            GroupManager: Initialized GroupManager instance
-        """
-        if self._group_manager is None:
-            from .group_manager import GroupManager
-
-            self._group_manager = GroupManager(self.client, self.config)
-        return self._group_manager
+        self.policy_manager = policy_manager
+        self.user_manager = user_manager
+        self.group_manager = group_manager
 
     # === SHARING OPERATIONS ===
 
@@ -330,39 +284,22 @@ class SharingManager:
         path: str,
     ) -> None:
         """Add or remove path sharing by updating the appropriate policy."""
-        policy_model = await self._get_policy(target_type, target_name)
-
-        if not policy_model:
-            raise DataGovernanceError(
-                f"No policy found for {target_type.value} {target_name}. "
-                f"User/group must be created first before sharing."
-            )
-
         if operation == SharingOperation.ADD:
-            updated_policy = self.policy_manager.add_path_access_to_policy(
-                policy_model, path, PolicyPermissionLevel.WRITE
+            await self.policy_manager.add_path_access_for_target(
+                target_type, target_name, path, PolicyPermissionLevel.WRITE
             )
             log_message = (
                 f"Added path sharing: {path} to {target_type.value} {target_name}"
             )
             logger.debug(log_message)
         else:  # SharingOperation.REMOVE
-            updated_policy = self.policy_manager.remove_path_access_from_policy(
-                policy_model, path
+            await self.policy_manager.remove_path_access_for_target(
+                target_type, target_name, path
             )
             log_message = (
                 f"Removed path sharing: {path} from {target_type.value} {target_name}"
             )
             logger.info(log_message)
-
-        await self.policy_manager.update_policy(updated_policy)
-
-    async def _get_policy(self, target_type: PolicyTarget, target_name: str):
-        """Get existing policy for target."""
-        if target_type == PolicyTarget.USER:
-            return await self.policy_manager.get_user_home_policy(target_name)
-        else:
-            return await self.policy_manager.get_group_policy(target_name)
 
     # === PUBLIC/PRIVATE ACCESS METHODS ===
 

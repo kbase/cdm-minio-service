@@ -3,9 +3,10 @@ import logging
 import tempfile
 import uuid
 from pathlib import Path
-from typing import List, Optional
+from typing import Callable, List, Optional
 
 from ...service.exceptions import PolicyOperationError
+from ..core.distributed_lock import DistributedLockManager
 from ..core.minio_client import MinIOClient
 from ..core.policy_builder import PolicyBuilder
 from ..core.policy_creator import PolicyCreator
@@ -45,8 +46,31 @@ class PolicyManager(ResourceManager[PolicyModel]):
     - Policy templates and document generation
     """
 
-    def __init__(self, client: MinIOClient, config: MinIOConfig) -> None:
+    def __init__(
+        self,
+        client: MinIOClient,
+        config: MinIOConfig,
+        lock_manager: Optional[DistributedLockManager] = None,
+    ) -> None:
+        """
+        Initialize the PolicyManager.
+
+        Args:
+            client: MinIO client instance used for executing commands and object ops.
+            config: MinIO configuration for bucket and path conventions.
+            lock_manager: Optional distributed lock manager. Required for any
+                operations that modify an existing policy's contents (e.g.,
+                add_path_access_for_target, remove_path_access_for_target),
+                which acquire a lock to ensure safe read-modify-write across instances.
+
+        Notes:
+            - Read-only operations (listing, loading policies, computing accessible
+              paths, generating names) do not require a lock manager.
+            - If a modifying method is called without a lock manager, a
+              PolicyOperationError will be raised.
+        """
         super().__init__(client, config)
+        self._lock_manager = lock_manager
 
     # === ResourceManager Abstract Method Implementations ===
 
@@ -91,25 +115,126 @@ class PolicyManager(ResourceManager[PolicyModel]):
                 f"Failed to parse policy list command output: {stdout}"
             ) from e
 
-    # === CORE POLICY CRUD OPERATIONS ===
+    # === Read-modify-write policy updates (under lock) ===
 
-    async def update_policy(self, policy_model: PolicyModel) -> PolicyModel:
+    async def add_path_access_for_target(
+        self,
+        target_type: PolicyTarget,
+        target_name: str,
+        path: str,
+        permission_level: PolicyPermissionLevel,
+    ) -> None:
         """
-        Update an existing policy in MinIO with new permissions or statements.
+        Grant path access to a target (user or group) using a safe read-modify-write.
 
-        This method handles the complex process of updating policies by:
-        1. Detaching the policy from its current targets
-        2. Deleting the old policy
-        3. Creating the updated policy
-        4. Re-attaching the policy to its targets
+        The method acquires the distributed lock for the target's policy, reloads the
+        latest policy while holding the lock, applies the change (add path access), and
+        persists via the shadow-policy update flow.
 
         Args:
-            policy_model: The updated policy model to save to MinIO
+            target_type: The policy target type (user or group).
+            target_name: The username or group name.
+            path: The S3 path to grant (e.g., "s3a://bucket/data/project/").
+            permission_level: The access level to grant for the path.
         """
-        async with self.operation_context("update_policy"):
-            await self._update_minio_policy(policy_model)
-            logger.info(f"Updated policy: {policy_model.policy_name}")
-            return policy_model
+        async with self.operation_context("add_path_access_for_target"):
+            await self._update_policy_for_target_with_transform(
+                target_type,
+                target_name,
+                lambda current: self.add_path_access_to_policy(
+                    current, path, permission_level
+                ),
+            )
+
+    async def remove_path_access_for_target(
+        self,
+        target_type: PolicyTarget,
+        target_name: str,
+        path: str,
+    ) -> None:
+        """
+        Revoke path access from a target (user or group) using a safe read-modify-write.
+
+        The method acquires the distributed lock for the target's policy, reloads the
+        latest policy while holding the lock, applies the change (remove path access),
+        and persists via the shadow-policy update flow.
+
+        Args:
+            target_type: The policy target type (user or group).
+            target_name: The username or group name.
+            path: The S3 path to revoke (e.g., "s3a://bucket/data/project/").
+        """
+        async with self.operation_context("remove_path_access_for_target"):
+            await self._update_policy_for_target_with_transform(
+                target_type,
+                target_name,
+                lambda current: self.remove_path_access_from_policy(current, path),
+            )
+
+    def _get_policy_name_for_target(
+        self, target_type: PolicyTarget, target_name: str
+    ) -> str:
+        """
+        Resolve the MinIO policy name for a given target.
+
+        Note:
+            - USER targets map to user home policy
+            - GROUP targets map to group home policy
+            - User System policy are not used for path access updates
+        """
+        if target_type == PolicyTarget.USER:
+            return self.get_policy_name(PolicyType.USER_HOME, target_name)
+        elif target_type == PolicyTarget.GROUP:
+            return self.get_policy_name(PolicyType.GROUP_HOME, target_name)
+        else:
+            raise PolicyOperationError(
+                f"Unsupported target type for path access update: {target_type}"
+            )
+
+    async def _load_policy_for_target(
+        self, target_type: PolicyTarget, target_name: str
+    ) -> PolicyModel:
+        """
+        Load the current PolicyModel for a target from MinIO.
+
+        Note:
+            - USER targets map to user home policy
+            - GROUP targets map to group home policy
+            - User System policy are not used for path access updates
+        """
+        if target_type == PolicyTarget.USER:
+            policy_model = await self.get_user_home_policy(target_name)
+        elif target_type == PolicyTarget.GROUP:
+            policy_model = await self.get_group_policy(target_name)
+        else:
+            raise PolicyOperationError(
+                f"Unsupported target type for path access update: {target_type}"
+            )
+
+        return policy_model
+
+    async def _update_policy_for_target_with_transform(
+        self,
+        target_type: PolicyTarget,
+        target_name: str,
+        transform: Callable[[PolicyModel], PolicyModel],
+    ) -> None:
+        """
+        This helper ensures consistency by acquiring the distributed lock for the
+        resolved policy, reloading the latest policy document while holding the lock,
+        applying the provided transformation function to produce a new PolicyModel,
+        and then persisting the change using the shadow-policy flow.
+        """
+        policy_name = self._get_policy_name_for_target(target_type, target_name)
+        if not self._lock_manager:
+            raise PolicyOperationError("Distributed lock manager not initialized")
+        async with self._lock_manager.policy_update_lock(policy_name):
+            # Re-load inside the lock for latest
+            current_policy_model = await self._load_policy_for_target(
+                target_type, target_name
+            )
+            updated_policy = transform(current_policy_model)
+            await self._update_minio_policy(updated_policy)
 
     # === USER/GROUP POLICY MANAGEMENT ===
 
