@@ -89,6 +89,15 @@ class UserSqlWarehousePrefixResponse(BaseModel):
     sql_warehouse_prefix: Annotated[str, Field(description="User's SQL warehouse prefix")]
 
 
+class GroupSqlWarehousePrefixResponse(BaseModel):
+    """Response model for group's SQL warehouse prefix."""
+
+    model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
+
+    group_name: Annotated[str, Field(description="Group name", min_length=1)]
+    sql_warehouse_prefix: Annotated[str, Field(description="Group's SQL warehouse prefix")]
+
+
 # ===== USER WORKSPACE ENDPOINTS =====
 
 
@@ -235,6 +244,39 @@ async def get_group_workspace(
     )
 
     logger.info(f"Retrieved group workspace for {group_name} by user {username}")
+    return response
+
+
+@router.get(
+    "/me/groups/{group_name}/sql-warehouse-prefix",
+    response_model=GroupSqlWarehousePrefixResponse,
+    summary="Get group SQL warehouse prefix",
+    description="Get the SQL warehouse prefix for a specific group (requires group membership).",
+)
+async def get_group_sql_warehouse_prefix(
+    group_name: Annotated[str, Path(description="Group name", min_length=1)],
+    authenticated_user: Annotated[KBaseUser, Depends(auth)],
+    request: Request,
+):
+    """Get the SQL warehouse prefix for a specific group."""
+    app_state = get_app_state(request)
+
+    username = authenticated_user.user
+
+    # Check if user is a member of the group
+    is_member = await app_state.group_manager.is_user_in_group(username, group_name)
+    if not is_member:
+        raise MinIOManagerError("User is not a member of the group")
+
+    # Get group SQL warehouse prefix (tenant SQL warehouse)
+    sql_warehouse_prefix = f"s3a://{app_state.group_manager.config.default_bucket}/{app_state.group_manager.tenant_sql_warehouse_prefix}/{group_name}/"
+
+    response = GroupSqlWarehousePrefixResponse(
+        group_name=group_name,
+        sql_warehouse_prefix=sql_warehouse_prefix,
+    )
+
+    logger.info(f"Retrieved SQL warehouse prefix for group {group_name} by user {username}")
     return response
 
 
