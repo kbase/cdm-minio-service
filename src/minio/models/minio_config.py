@@ -126,7 +126,7 @@ class MinIOConfig(BaseModel):
     @field_validator(
         "users_sql_warehouse_prefix",
         "users_general_warehouse_prefix",
-        "groups_general_warehouse_prefix",
+        "tenant_general_warehouse_prefix",
         "tenant_sql_warehouse_prefix",
     )
     @classmethod
