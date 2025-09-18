@@ -332,7 +332,7 @@ class PolicyBuilder:
 
         # For governance paths with wildcards, also add parent directory permissions
         parent_arns = []
-        if "*" in clean_path:
+        if clean_path.endswith("*"):
             path_parts = clean_path.split("/")
             if len(path_parts) > 1:
                 parent_path = "/".join(path_parts[:-1])
@@ -395,7 +395,7 @@ class PolicyBuilder:
         # For governance paths with wildcards, also add parent directory access
         # This allows users to navigate to paths like users-sql-warehouse/tgu2/u_tgu2__*
         # by granting access to the parent directory users-sql-warehouse/tgu2
-        if "*" in normalized_path:
+        if normalized_path.endswith("*"):
             # Extract parent directory by removing the last path component
             path_parts = normalized_path.split("/")
             if len(path_parts) > 1:
