@@ -108,8 +108,9 @@ class NamespacePrefixResponse(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, frozen=True)
 
     username: Annotated[str, Field(description="Username", min_length=1)]
+    user_namespace_prefix: Annotated[str, Field(description="User's governance namespace prefix (e.g., u_user__)")]
     tenant: Annotated[str | None, Field(description="Tenant (group) name", default=None)]
-    namespace_prefix: Annotated[str, Field(description="Governance namespace prefix (e.g., u_user__ or t_tenant__)")]
+    tenant_namespace_prefix: Annotated[str | None, Field(description="Tenant's governance namespace prefix (e.g., t_tenant__)", default=None)]
 
 
 # ===== USER WORKSPACE ENDPOINTS =====
@@ -334,14 +335,18 @@ async def get_namespace_prefix(
     request: Request,
     tenant: Annotated[str | None, Query(description="Optional tenant (group) name", min_length=1)] = None,
 ):
-    """Return governance namespace prefix for user or specified tenant.
+    """Return governance namespace prefix for user and optionally for specified tenant.
 
-    - Without tenant: returns user's prefix, e.g. `u_<user>__`
-    - With tenant: verifies membership, then returns tenant prefix, e.g. `t_<tenant>__`
+    Always returns the user's namespace prefix. If tenant is provided and user is a member,
+    also returns the tenant's namespace prefix.
     """
     app_state = get_app_state(request)
     username = authenticated_user.user
 
+    # Always generate user prefix
+    user_ns_prefix = generate_user_governance_prefix(username)
+
+    tenant_ns_prefix = None
     if tenant:
         # Check if group exists
         group_exists = await app_state.group_manager.get_group_info(tenant)
@@ -351,16 +356,11 @@ async def get_namespace_prefix(
         is_member = await app_state.group_manager.is_user_in_group(username, tenant)
         if not is_member:
             raise MinIOManagerError(f"User {username} is not a member of the group {tenant}")
-        ns_prefix = generate_group_governance_prefix(tenant)
-        return NamespacePrefixResponse(
-            username=username,
-            tenant=tenant,
-            namespace_prefix=ns_prefix,
-        )
+        tenant_ns_prefix = generate_group_governance_prefix(tenant)
 
-    ns_prefix = generate_user_governance_prefix(username)
     return NamespacePrefixResponse(
         username=username,
-        tenant=None,
-        namespace_prefix=ns_prefix,
+        user_namespace_prefix=user_ns_prefix,
+        tenant=tenant,
+        tenant_namespace_prefix=tenant_ns_prefix,
     )
