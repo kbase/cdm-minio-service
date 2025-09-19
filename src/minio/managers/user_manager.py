@@ -400,7 +400,7 @@ class UserManager(ResourceManager[UserModel]):
 
     # PRIVATE HELPER METHODS
 
-    def _generate_secure_password(self, length: int = 32) -> str:
+    def _generate_secure_password(self, length: int = 8) -> str:
         """Generate a secure password for MinIO users."""
         alphabet = string.ascii_letters + string.digits + "!@#$%^&*"
         return "".join(secrets.choice(alphabet) for _ in range(length))
